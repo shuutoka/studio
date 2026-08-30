@@ -1,11 +1,35 @@
 export type ProjectStatus = "idea" | "draft" | "revision" | "done";
 export type PageStatus = "draft" | "review" | "done";
+export type ProjectType = "manga" | "novel" | "script" | "free";
+export type PageFormat = "free" | "a4" | "a5" | "pocket" | "novel" | "large";
+export type GoalStatus = "todo" | "doing" | "done";
+
+export const PROJECT_TYPE_LABELS: Record<ProjectType, string> = {
+  manga: "Manga / BD",
+  novel: "Roman",
+  script: "Script",
+  free: "Écriture libre",
+};
+
+export const PAGE_FORMATS: Record<
+  PageFormat,
+  { label: string; detail: string; width: number; height: number | null }
+> = {
+  free: { label: "Libre", detail: "Sans limite de page", width: 760, height: null },
+  a4: { label: "A4", detail: "210 × 297 mm", width: 680, height: 962 },
+  a5: { label: "A5", detail: "148 × 210 mm", width: 520, height: 738 },
+  pocket: { label: "Livre de poche", detail: "110 × 178 mm", width: 440, height: 712 },
+  novel: { label: "Roman standard", detail: "140 × 216 mm", width: 520, height: 802 },
+  large: { label: "Grand format", detail: "170 × 240 mm", width: 620, height: 875 },
+};
 
 export type StudioPage = {
   id: string;
   title: string;
   content: string;
   status: PageStatus;
+  typeOverride: ProjectType | null;
+  formatOverride: PageFormat | null;
 };
 
 export type StudioChapter = {
@@ -20,11 +44,35 @@ export type StudioVolume = {
   chapters: StudioChapter[];
 };
 
+export type CharacterRelation = {
+  id: string;
+  targetCharacterId: string;
+  type: string;
+  description: string;
+};
+
+export type CharacterOutfit = {
+  id: string;
+  name: string;
+  description: string;
+  imageIds: string[];
+};
+
 export type StudioCharacter = {
   id: string;
   name: string;
   role: string;
+  age: string;
+  species: string;
   description: string;
+  appearance: string;
+  personality: string;
+  objectives: string;
+  notes: string;
+  tags: string[];
+  imageIds: string[];
+  outfits: CharacterOutfit[];
+  relations: CharacterRelation[];
 };
 
 export type StudioNote = {
@@ -33,12 +81,38 @@ export type StudioNote = {
   content: string;
 };
 
+export type StudioGoal = {
+  id: string;
+  title: string;
+  description: string;
+  status: GoalStatus;
+};
+
+export type StudioFont = {
+  id: string;
+  name: string;
+  family: string;
+  mediaId: string;
+};
+
+export type StudioMedia = {
+  id: string;
+  projectId: string;
+  kind: "character-image" | "outfit-image" | "font";
+  name: string;
+  mimeType: string;
+  createdAt: string;
+  blob: Blob;
+};
+
 export type StudioProject = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   id: string;
   name: string;
   description: string;
   status: ProjectStatus;
+  projectType: ProjectType;
+  defaultPageFormat: PageFormat;
   targetPages: number;
   createdAt: string;
   updatedAt: string;
@@ -47,6 +121,8 @@ export type StudioProject = {
   volumes: StudioVolume[];
   characters: StudioCharacter[];
   notes: StudioNote[];
+  goals: StudioGoal[];
+  customFonts: StudioFont[];
 };
 
 export type ProjectStats = {
@@ -58,6 +134,7 @@ export type ProjectStats = {
   notes: number;
   words: number;
   progress: number;
+  completedGoals: number;
 };
 
 export function createId(prefix: string) {
@@ -66,6 +143,36 @@ export function createId(prefix: string) {
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   return `${prefix}-${random}`;
+}
+
+export function createEmptyPage(index = 1): StudioPage {
+  return {
+    id: createId("page"),
+    title: `Page ${index}`,
+    content: "",
+    status: "draft",
+    typeOverride: null,
+    formatOverride: null,
+  };
+}
+
+export function createEmptyCharacter(name = "Nouveau personnage"): StudioCharacter {
+  return {
+    id: createId("character"),
+    name,
+    role: "",
+    age: "",
+    species: "",
+    description: "",
+    appearance: "",
+    personality: "",
+    objectives: "",
+    notes: "",
+    tags: [],
+    imageIds: [],
+    outfits: [],
+    relations: [],
+  };
 }
 
 export function stripHtml(html: string) {
@@ -100,18 +207,23 @@ export function getProjectStats(project: StudioProject): ProjectStats {
       progressBase > 0
         ? Math.min(100, Math.round((completedPages / progressBase) * 100))
         : 0,
+    completedGoals: project.goals.filter((goal) => goal.status === "done").length,
   };
 }
 
-export function createBlankProject(name: string): StudioProject {
+export function createBlankProject(
+  name: string,
+  projectType: ProjectType = "manga",
+): StudioProject {
   const now = new Date().toISOString();
-  const pageId = createId("page");
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: createId("project"),
     name: name.trim() || "Projet sans titre",
     description: "",
     status: "idea",
+    projectType,
+    defaultPageFormat: projectType === "novel" ? "novel" : projectType === "free" ? "free" : "a4",
     targetPages: 0,
     createdAt: now,
     updatedAt: now,
@@ -125,32 +237,29 @@ export function createBlankProject(name: string): StudioProject {
           {
             id: createId("chapter"),
             title: "Chapitre 1",
-            pages: [
-              {
-                id: pageId,
-                title: "Page 1",
-                content: "<p>Commencez à écrire ici…</p>",
-                status: "draft",
-              },
-            ],
+            pages: [createEmptyPage()],
           },
         ],
       },
     ],
     characters: [],
     notes: [],
+    goals: [],
+    customFonts: [],
   };
 }
 
 export function createDemoProject(): StudioProject {
   const now = new Date().toISOString();
-  const project: StudioProject = {
-    schemaVersion: 1,
+  return {
+    schemaVersion: 2,
     id: "project-demo-enfer-fatal",
     name: "Enfer Fatal",
     description:
       "Projet de démonstration. Explorez le Studio, puis créez votre propre projet depuis l’accueil.",
     status: "draft",
+    projectType: "manga",
+    defaultPageFormat: "a4",
     targetPages: 24,
     createdAt: now,
     updatedAt: now,
@@ -169,6 +278,8 @@ export function createDemoProject(): StudioProject {
                 id: "page-demo-1",
                 title: "Page 1",
                 status: "draft",
+                typeOverride: null,
+                formatOverride: null,
                 content:
                   "<h2>Ouverture</h2><p><strong>Plan général :</strong> les tours infernales dominent la ville sous un ciel rougeoyant.</p><p><em>Narration :</em> Même l’Enfer a besoin d’une bonne direction.</p>",
               },
@@ -176,6 +287,8 @@ export function createDemoProject(): StudioProject {
                 id: "page-demo-2",
                 title: "Page 2",
                 status: "done",
+                typeOverride: null,
+                formatOverride: null,
                 content:
                   "<p>Lucy traverse les bureaux, un café à la main. Les employés s’écartent sur son passage.</p><p><strong>Lucy :</strong> Le rapport des âmes, sur mon bureau avant midi.</p>",
               },
@@ -186,9 +299,11 @@ export function createDemoProject(): StudioProject {
     ],
     characters: [
       {
+        ...createEmptyCharacter("Lucy"),
         id: "character-demo-lucy",
-        name: "Lucy",
         role: "Protagoniste — CEO des Enfers",
+        species: "Démone",
+        tags: ["protagoniste", "enfer", "direction"],
         description:
           "Démone charismatique et redoutablement organisée. Elle voyage entre les mondes tout en dirigeant l’Enfer.",
       },
@@ -201,14 +316,89 @@ export function createDemoProject(): StudioProject {
           "Comédie surnaturelle, aventure et contraste entre l’administration infernale et les voyages intermondes.",
       },
     ],
+    goals: [
+      {
+        id: "goal-demo-1",
+        title: "Définir l’ouverture du chapitre",
+        description: "Valider la scène d’introduction et son rythme.",
+        status: "doing",
+      },
+      {
+        id: "goal-demo-2",
+        title: "Finaliser la fiche de Lucy",
+        description: "Compléter ses objectifs et ses relations.",
+        status: "todo",
+      },
+    ],
+    customFonts: [],
   };
-
-  return project;
 }
 
-export function normalizeImportedProject(value: unknown): StudioProject {
+function normalizePage(value: Partial<StudioPage>, index: number): StudioPage {
+  return {
+    id: typeof value.id === "string" ? value.id : createId("page"),
+    title: typeof value.title === "string" ? value.title : `Page ${index + 1}`,
+    content:
+      value.content === "<p>Commencez à écrire ici…</p>"
+        ? ""
+        : typeof value.content === "string"
+          ? value.content
+          : "",
+    status: ["draft", "review", "done"].includes(value.status ?? "")
+      ? (value.status as PageStatus)
+      : "draft",
+    typeOverride: ["manga", "novel", "script", "free"].includes(value.typeOverride ?? "")
+      ? (value.typeOverride as ProjectType)
+      : null,
+    formatOverride: ["free", "a4", "a5", "pocket", "novel", "large"].includes(
+      value.formatOverride ?? "",
+    )
+      ? (value.formatOverride as PageFormat)
+      : null,
+  };
+}
+
+function normalizeCharacter(value: Partial<StudioCharacter>): StudioCharacter {
+  return {
+    ...createEmptyCharacter(typeof value.name === "string" ? value.name : "Personnage"),
+    id: typeof value.id === "string" ? value.id : createId("character"),
+    role: typeof value.role === "string" ? value.role : "",
+    age: typeof value.age === "string" ? value.age : "",
+    species: typeof value.species === "string" ? value.species : "",
+    description: typeof value.description === "string" ? value.description : "",
+    appearance: typeof value.appearance === "string" ? value.appearance : "",
+    personality: typeof value.personality === "string" ? value.personality : "",
+    objectives: typeof value.objectives === "string" ? value.objectives : "",
+    notes: typeof value.notes === "string" ? value.notes : "",
+    tags: Array.isArray(value.tags) ? value.tags.filter((tag): tag is string => typeof tag === "string") : [],
+    imageIds: Array.isArray(value.imageIds)
+      ? value.imageIds.filter((id): id is string => typeof id === "string")
+      : [],
+    outfits: Array.isArray(value.outfits)
+      ? value.outfits.map((outfit) => ({
+          id: typeof outfit.id === "string" ? outfit.id : createId("outfit"),
+          name: typeof outfit.name === "string" ? outfit.name : "Tenue",
+          description: typeof outfit.description === "string" ? outfit.description : "",
+          imageIds: Array.isArray(outfit.imageIds)
+            ? outfit.imageIds.filter((id): id is string => typeof id === "string")
+            : [],
+        }))
+      : [],
+    relations: Array.isArray(value.relations)
+      ? value.relations.map((relation) => ({
+          id: typeof relation.id === "string" ? relation.id : createId("relation"),
+          targetCharacterId:
+            typeof relation.targetCharacterId === "string" ? relation.targetCharacterId : "",
+          type: typeof relation.type === "string" ? relation.type : "Relation",
+          description: typeof relation.description === "string" ? relation.description : "",
+        }))
+      : [],
+  };
+}
+
+export function normalizeProject(value: unknown): StudioProject {
   if (!value || typeof value !== "object") {
-    throw new Error("Le projet importé est invalide.");
+    throw new Error("Le projet est invalide.");
   }
 
   const input = value as Partial<StudioProject>;
@@ -219,22 +409,74 @@ export function normalizeImportedProject(value: unknown): StudioProject {
   const now = new Date().toISOString();
   const revision = Number.isFinite(input.revision) ? Number(input.revision) : 1;
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: input.id,
     name: input.name,
     description: typeof input.description === "string" ? input.description : "",
     status: ["idea", "draft", "revision", "done"].includes(input.status ?? "")
       ? (input.status as ProjectStatus)
       : "draft",
-    targetPages: Number.isFinite(input.targetPages)
-      ? Math.max(0, Number(input.targetPages))
-      : 0,
+    projectType: ["manga", "novel", "script", "free"].includes(input.projectType ?? "")
+      ? (input.projectType as ProjectType)
+      : "manga",
+    defaultPageFormat: ["free", "a4", "a5", "pocket", "novel", "large"].includes(
+      input.defaultPageFormat ?? "",
+    )
+      ? (input.defaultPageFormat as PageFormat)
+      : "a4",
+    targetPages: Number.isFinite(input.targetPages) ? Math.max(0, Number(input.targetPages)) : 0,
     createdAt: typeof input.createdAt === "string" ? input.createdAt : now,
     updatedAt: typeof input.updatedAt === "string" ? input.updatedAt : now,
     revision,
-    savedRevision: revision,
-    volumes: Array.isArray(input.volumes) ? input.volumes : [],
-    characters: Array.isArray(input.characters) ? input.characters : [],
-    notes: Array.isArray(input.notes) ? input.notes : [],
+    savedRevision: Number.isFinite(input.savedRevision) ? Number(input.savedRevision) : revision,
+    volumes: Array.isArray(input.volumes)
+      ? input.volumes.map((volume, volumeIndex) => ({
+          id: typeof volume.id === "string" ? volume.id : createId("volume"),
+          title: typeof volume.title === "string" ? volume.title : `Volume ${volumeIndex + 1}`,
+          chapters: Array.isArray(volume.chapters)
+            ? volume.chapters.map((chapter, chapterIndex) => ({
+                id: typeof chapter.id === "string" ? chapter.id : createId("chapter"),
+                title:
+                  typeof chapter.title === "string"
+                    ? chapter.title
+                    : `Chapitre ${chapterIndex + 1}`,
+                pages: Array.isArray(chapter.pages)
+                  ? chapter.pages.map((page, pageIndex) => normalizePage(page, pageIndex))
+                  : [],
+              }))
+            : [],
+        }))
+      : [],
+    characters: Array.isArray(input.characters)
+      ? input.characters.map((character) => normalizeCharacter(character))
+      : [],
+    notes: Array.isArray(input.notes)
+      ? input.notes.map((note) => ({
+          id: typeof note.id === "string" ? note.id : createId("note"),
+          title: typeof note.title === "string" ? note.title : "Note",
+          content: typeof note.content === "string" ? note.content : "",
+        }))
+      : [],
+    goals: Array.isArray(input.goals)
+      ? input.goals.map((goal) => ({
+          id: typeof goal.id === "string" ? goal.id : createId("goal"),
+          title: typeof goal.title === "string" ? goal.title : "Objectif",
+          description: typeof goal.description === "string" ? goal.description : "",
+          status: ["todo", "doing", "done"].includes(goal.status ?? "")
+            ? (goal.status as GoalStatus)
+            : "todo",
+        }))
+      : [],
+    customFonts: Array.isArray(input.customFonts)
+      ? input.customFonts.filter(
+          (font): font is StudioFont =>
+            typeof font.id === "string" &&
+            typeof font.name === "string" &&
+            typeof font.family === "string" &&
+            typeof font.mediaId === "string",
+        )
+      : [],
   };
 }
+
+export const normalizeImportedProject = normalizeProject;

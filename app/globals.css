@@ -152,12 +152,6 @@ textarea {
   background-size: 28px 28px;
 }
 
-.studio-editor:empty::before {
-  content: "Commencez à écrire ici…";
-  color: #605a66;
-  pointer-events: none;
-}
-
 .studio-editor h1 {
   margin: 0 0 1.5rem;
   color: white;
@@ -217,6 +211,52 @@ textarea {
   color: #ff8a95;
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+.paper-sheet {
+  border-radius: 3px;
+}
+
+.paper-editor h1,
+.paper-editor h2,
+.paper-editor h3 {
+  color: #29262b;
+}
+
+.paper-editor blockquote {
+  color: #68616d;
+}
+
+.paper-editor hr {
+  border-top-color: rgba(41, 38, 43, 0.16);
+}
+
+.studio-editor font[size="1"] {
+  font-size: 0.75rem;
+}
+
+.studio-editor font[size="2"] {
+  font-size: 0.875rem;
+}
+
+.studio-editor font[size="3"] {
+  font-size: 1rem;
+}
+
+.studio-editor font[size="4"] {
+  font-size: 1.125rem;
+}
+
+.studio-editor font[size="5"] {
+  font-size: 1.5rem;
+}
+
+.studio-editor font[size="6"] {
+  font-size: 2rem;
+}
+
+.studio-editor font[size="7"] {
+  font-size: 2.5rem;
 }
 
 @media (max-width: 767px) {
