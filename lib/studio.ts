@@ -6,6 +6,7 @@ export type GoalStatus = "todo" | "doing" | "done";
 export type BackupExtension = "efs" | "zip";
 export type AppTheme = "normal" | "dark" | "light";
 export type InterfaceSound = "none" | "soft" | "mechanical" | "digital";
+export type WritingColorMode = "light" | "dark";
 export type QuoteStyle = "straight" | "french";
 export type FooterType = "none" | "page" | "date" | "custom";
 export type ShortcutPressMode = "single" | "double";
@@ -46,6 +47,8 @@ export type StudioPage = {
   typeOverride: ProjectType | null;
   formatOverride: PageFormat | null;
   backgroundOverride: string | null;
+  ignoreProjectFooter: boolean;
+  /** Legacy v3 fields kept so older saves migrate without losing their footer. */
   footerType: FooterType;
   footerText: string;
 };
@@ -120,7 +123,7 @@ export type StudioShortcuts = {
 };
 
 export type StudioSettings = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   id: "studio-settings";
   revision: number;
   savedRevision: number;
@@ -133,6 +136,8 @@ export type StudioSettings = {
   customFonts: StudioFont[];
   freeBackground: string;
   paperBackground: string;
+  freeColorMode: WritingColorMode;
+  paperColorMode: WritingColorMode;
   customColors: string[];
   quoteStyle: QuoteStyle;
   shortcuts: StudioShortcuts;
@@ -140,7 +145,7 @@ export type StudioSettings = {
 };
 
 export type StudioProject = {
-  schemaVersion: 3;
+  schemaVersion: 4;
   id: string;
   name: string;
   description: string;
@@ -148,6 +153,8 @@ export type StudioProject = {
   projectType: ProjectType;
   defaultPageFormat: PageFormat;
   targetPages: number;
+  footerType: FooterType;
+  footerText: string;
   createdAt: string;
   updatedAt: string;
   revision: number;
@@ -182,7 +189,7 @@ export function createId(prefix: string) {
 
 export function createDefaultSettings(): StudioSettings {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: "studio-settings",
     revision: 1,
     savedRevision: 1,
@@ -194,7 +201,9 @@ export function createDefaultSettings(): StudioSettings {
     enabledStandardFonts: STANDARD_FONTS.map((font) => font.id),
     customFonts: [],
     freeBackground: "#15131a",
-    paperBackground: "#f7f4ed",
+    paperBackground: "#ffffff",
+    freeColorMode: "dark",
+    paperColorMode: "light",
     customColors: [],
     quoteStyle: "french",
     shortcuts: {
@@ -213,6 +222,10 @@ export function normalizeSettings(value: unknown): StudioSettings {
   const input = value as Partial<StudioSettings>;
   const validStandardIds = new Set<string>(STANDARD_FONTS.map((font) => font.id));
   const revision = Number.isFinite(input.revision) ? Math.max(1, Number(input.revision)) : 1;
+  const legacyPaperBackground = normalizeColor(input.paperBackground, defaults.paperBackground);
+  const paperBackground = input.schemaVersion !== 2 && legacyPaperBackground.toLowerCase() === "#f7f4ed"
+    ? defaults.paperBackground
+    : legacyPaperBackground;
   return {
     ...defaults,
     revision,
@@ -242,7 +255,13 @@ export function normalizeSettings(value: unknown): StudioSettings {
         })
       : [],
     freeBackground: normalizeColor(input.freeBackground, defaults.freeBackground),
-    paperBackground: normalizeColor(input.paperBackground, defaults.paperBackground),
+    paperBackground,
+    freeColorMode: input.freeColorMode === "light" || input.freeColorMode === "dark"
+      ? input.freeColorMode
+      : inferColorMode(input.freeBackground, defaults.freeColorMode),
+    paperColorMode: input.paperColorMode === "light" || input.paperColorMode === "dark"
+      ? input.paperColorMode
+      : inferColorMode(paperBackground, defaults.paperColorMode),
     customColors: Array.isArray(input.customColors)
       ? input.customColors.flatMap((color) => normalizeColor(color, "") ? [color] : []).slice(0, 3)
       : [],
@@ -278,10 +297,20 @@ function normalizeColor(value: unknown, fallback: string) {
   return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
 }
 
+function inferColorMode(value: unknown, fallback: WritingColorMode): WritingColorMode {
+  const color = normalizeColor(value, "");
+  if (!color) return fallback;
+  const red = Number.parseInt(color.slice(1, 3), 16);
+  const green = Number.parseInt(color.slice(3, 5), 16);
+  const blue = Number.parseInt(color.slice(5, 7), 16);
+  return (red * 299 + green * 587 + blue * 114) / 1000 < 145 ? "dark" : "light";
+}
+
 export function createEmptyPage(index = 1): StudioPage {
   return {
     id: createId("page"), title: `Page ${index}`, content: "", status: "draft",
     typeOverride: null, formatOverride: null, backgroundOverride: null,
+    ignoreProjectFooter: false,
     footerType: "none", footerText: "",
   };
 }
@@ -321,10 +350,11 @@ export function getProjectStats(project: StudioProject): ProjectStats {
 export function createBlankProject(name: string, projectType: ProjectType = "manga"): StudioProject {
   const now = new Date().toISOString();
   return {
-    schemaVersion: 3, id: createId("project"), name: name.trim() || "Projet sans titre",
+    schemaVersion: 4, id: createId("project"), name: name.trim() || "Projet sans titre",
     description: "", status: "idea", projectType,
     defaultPageFormat: projectType === "novel" ? "novel" : projectType === "free" ? "free" : "a4",
-    targetPages: 0, createdAt: now, updatedAt: now, revision: 1, savedRevision: 0,
+    targetPages: 0, footerType: "none", footerText: "",
+    createdAt: now, updatedAt: now, revision: 1, savedRevision: 0,
     volumes: [{
       id: createId("volume"), title: "Volume 1",
       chapters: [{ id: createId("chapter"), title: "Chapitre 1", pages: [createEmptyPage()] }],
@@ -378,6 +408,7 @@ function normalizePage(value: Partial<StudioPage>, index: number): StudioPage {
     typeOverride: ["manga", "novel", "script", "free"].includes(value.typeOverride ?? "") ? value.typeOverride as ProjectType : null,
     formatOverride: ["free", "a4", "a5", "pocket", "novel", "large"].includes(value.formatOverride ?? "") ? value.formatOverride as PageFormat : null,
     backgroundOverride: normalizeColor(value.backgroundOverride, "") || null,
+    ignoreProjectFooter: value.ignoreProjectFooter === true,
     footerType: ["none", "page", "date", "custom"].includes(value.footerType ?? "") ? value.footerType as FooterType : "none",
     footerText: typeof value.footerText === "string" ? value.footerText : "",
   };
@@ -420,8 +451,11 @@ export function normalizeProject(value: unknown): StudioProject {
   }
   const now = new Date().toISOString();
   const revision = Number.isFinite(input.revision) ? Number(input.revision) : 1;
+  const legacyFooterPage = input.volumes?.flatMap((volume) => volume.chapters ?? [])
+    .flatMap((chapter) => chapter.pages ?? [])
+    .find((page) => page.footerType && page.footerType !== "none");
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     id: input.id,
     name: input.name,
     description: typeof input.description === "string" ? input.description : "",
@@ -429,6 +463,10 @@ export function normalizeProject(value: unknown): StudioProject {
     projectType: ["manga", "novel", "script", "free"].includes(input.projectType ?? "") ? input.projectType as ProjectType : "manga",
     defaultPageFormat: ["free", "a4", "a5", "pocket", "novel", "large"].includes(input.defaultPageFormat ?? "") ? input.defaultPageFormat as PageFormat : "a4",
     targetPages: Number.isFinite(input.targetPages) ? Math.max(0, Number(input.targetPages)) : 0,
+    footerType: ["none", "page", "date", "custom"].includes(input.footerType ?? "")
+      ? input.footerType as FooterType
+      : legacyFooterPage?.footerType ?? "none",
+    footerText: typeof input.footerText === "string" ? input.footerText : legacyFooterPage?.footerText ?? "",
     createdAt: typeof input.createdAt === "string" ? input.createdAt : now,
     updatedAt: typeof input.updatedAt === "string" ? input.updatedAt : now,
     revision,

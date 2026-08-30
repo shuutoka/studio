@@ -2,7 +2,7 @@ import { strToU8, zipSync } from "fflate";
 
 import { safeFilename } from "@/lib/project-file";
 import {
-  stripHtml, type PageFormat, type StudioPage, type StudioProject, type StudioVolume,
+  stripHtml, type FooterType, type PageFormat, type StudioPage, type StudioProject, type StudioVolume,
 } from "@/lib/studio";
 
 export type WritingExportFormat = "doc" | "docx" | "odt" | "pdf" | "html" | "txt";
@@ -10,8 +10,6 @@ export type WritingExportResult = "download" | "print";
 
 type ManuscriptPage = {
   page: StudioPage;
-  chapterTitle: string;
-  startsChapter: boolean;
   format: PageFormat;
   pageNumber: number;
 };
@@ -20,6 +18,8 @@ type Manuscript = {
   projectName: string;
   volume: StudioVolume;
   pages: ManuscriptPage[];
+  footerType: FooterType;
+  footerText: string;
 };
 
 const PAGE_DIMENSIONS_MM: Record<PageFormat, { width: number; height: number }> = {
@@ -38,9 +38,12 @@ const allowedExportElements = new Set([
 
 const blockElements = new Set(["BLOCKQUOTE", "DIV", "H1", "H2", "H3", "LI", "OL", "P", "UL"]);
 
-export function getWrittenPageCount(project: StudioProject, volumeId: string) {
+export function getManuscriptPageCount(project: StudioProject, volumeId: string) {
   return createManuscript(project, volumeId).pages.length;
 }
+
+/** @deprecated Use getManuscriptPageCount. */
+export const getWrittenPageCount = getManuscriptPageCount;
 
 export function getManuscriptFilename(project: StudioProject, volumeId: string) {
   const volume = project.volumes.find((candidate) => candidate.id === volumeId);
@@ -54,7 +57,7 @@ export function exportProjectWriting(
   format: WritingExportFormat,
 ): WritingExportResult {
   const manuscript = createManuscript(project, volumeId);
-  if (!manuscript.pages.length) throw new Error("Ce manuscrit ne contient aucune page écrite.");
+  if (!manuscript.pages.length) throw new Error("Ce manuscrit ne contient aucune page.");
   const filename = getManuscriptFilename(project, volumeId);
 
   if (format === "txt") {
@@ -87,65 +90,66 @@ function createManuscript(project: StudioProject, volumeId: string): Manuscript 
   let pageNumber = 0;
 
   volume.chapters.forEach((chapter) => {
-    const writtenPages = chapter.pages.filter((page) => hasWrittenContent(page.content));
-    writtenPages.forEach((page, index) => {
+    chapter.pages.forEach((page) => {
       pageNumber += 1;
       pages.push({
         page,
-        chapterTitle: chapter.title,
-        startsChapter: index === 0,
         format: page.formatOverride ?? project.defaultPageFormat,
         pageNumber,
       });
     });
   });
 
-  return { projectName: project.name, volume, pages };
-}
-
-function hasWrittenContent(html: string) {
-  return Boolean(stripHtml(html).trim());
+  return {
+    projectName: project.name,
+    volume,
+    pages,
+    footerType: project.footerType,
+    footerText: project.footerText,
+  };
 }
 
 function buildPlainText(manuscript: Manuscript) {
   return manuscript.pages.map((item) => {
     const parts = [];
-    if (item.startsChapter) parts.push(item.chapterTitle, "");
     parts.push(htmlToPlainText(item.page.content));
-    const footer = pageFooter(item.page, item.pageNumber);
+    const footer = pageFooter(manuscript, item.page, item.pageNumber);
     if (footer) parts.push("", footer);
     return parts.join("\n").trim();
-  }).join("\n\f\n");
+  }).join("\f");
 }
 
 function buildHtml(manuscript: Manuscript) {
   const title = `${manuscript.projectName} — ${manuscript.volume.title}`;
+  const pageRules = Object.entries(PAGE_DIMENSIONS_MM).map(([format, dimensions]) =>
+    `@page page-${format}{size:${dimensions.width}mm ${dimensions.height}mm;margin:0}.manuscript-page.format-${format}{page:page-${format}}`,
+  ).join("");
   const pages = manuscript.pages.map((item) => {
     const dimensions = PAGE_DIMENSIONS_MM[item.format];
-    const footer = pageFooter(item.page, item.pageNumber);
-    return `<section class="manuscript-page format-${item.format}" style="--page-width:${dimensions.width}mm;--page-height:${dimensions.height}mm">${item.startsChapter ? `<h1 class="chapter-title">${escapeXml(item.chapterTitle)}</h1>` : ""}<div class="page-content">${sanitizeRichHtml(item.page.content)}</div>${footer ? `<footer>${escapeXml(footer)}</footer>` : ""}</section>`;
-  }).join("");
+    const footer = pageFooter(manuscript, item.page, item.pageNumber);
+    const content = sanitizeRichHtml(item.page.content) || "<p><br></p>";
+    return `<section class="manuscript-page format-${item.format}" style="--page-width:${dimensions.width}mm;--page-height:${dimensions.height}mm"><div class="page-content">${content}</div>${footer ? `<footer>${escapeXml(footer)}</footer>` : ""}</section>`;
+  }).join('<div class="hard-page-break" style="page-break-before:always;mso-break-type:page-break"></div>');
 
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>${escapeXml(title)}</title><style>
-@page{size:auto;margin:18mm}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#fff;color:#222}body{font:12pt/1.55 Georgia,"Times New Roman",serif}.manuscript-page{position:relative;width:var(--page-width);min-height:var(--page-height);margin:0 auto;padding:18mm;overflow-wrap:anywhere;break-after:page;page-break-after:always}.manuscript-page:last-child{break-after:auto;page-break-after:auto}.chapter-title{margin:0 0 1.3em;font-size:1.65em;line-height:1.2}.page-content h1,.page-content h2,.page-content h3{line-height:1.25}.page-content blockquote{margin-left:1.5em;border-left:3px solid #aaa;padding-left:1em}.manuscript-page footer{position:absolute;right:18mm;bottom:8mm;left:18mm;text-align:center;font-size:9pt;color:#666}@media screen{body{padding:24px;background:#e7e4e8}.manuscript-page{margin-bottom:24px;background:#fff;box-shadow:0 8px 30px #0002}}@media print{.manuscript-page{width:auto;min-height:calc(100vh - 36mm);margin:0;padding:0}.manuscript-page footer{right:0;bottom:-10mm;left:0}}
+${pageRules}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#fff;color:#222}body{font:12pt/1.55 Georgia,"Times New Roman",serif}.manuscript-page{position:relative;width:var(--page-width);height:var(--page-height);margin:0 auto;padding:18mm;overflow:hidden;overflow-wrap:anywhere}.hard-page-break{height:0;break-before:page;page-break-before:always}.page-content h1,.page-content h2,.page-content h3{line-height:1.25}.page-content blockquote{margin-left:1.5em;border-left:3px solid #aaa;padding-left:1em}.manuscript-page footer{position:absolute;right:18mm;bottom:8mm;left:18mm;text-align:center;font-size:9pt;color:#666}@media screen{body{padding:24px;background:#e7e4e8}.manuscript-page{margin-bottom:24px;background:#fff;box-shadow:0 8px 30px #0002}}@media print{.manuscript-page{margin:0}.hard-page-break{display:block}}
 </style></head><body>${pages}</body></html>`;
 }
 
 function buildDocx(manuscript: Manuscript) {
   const pageXml = manuscript.pages.map((item, index) => {
     const parts = [];
-    if (item.startsChapter) parts.push(docxParagraph([documentTextNode(item.chapterTitle)], { bold: true, size: 32 }, "480"));
     parts.push(...htmlToDocxParagraphs(item.page.content));
-    const footer = pageFooter(item.page, item.pageNumber);
+    const footer = pageFooter(manuscript, item.page, item.pageNumber);
     if (footer) parts.push(docxParagraph([documentTextNode(footer)], { color: "666666", size: 18 }, "120", "center"));
-    if (index < manuscript.pages.length - 1) parts.push(`<w:p><w:r><w:br w:type="page"/></w:r></w:p>`);
+    if (index < manuscript.pages.length - 1) parts.push(docxSectionBreak(item.format));
     return parts.join("");
   }).join("");
-  const pageSize = docxPageSize(manuscript.pages[0]?.format ?? "a4");
+  const finalSection = docxSectionProperties(manuscript.pages.at(-1)?.format ?? "a4");
   const archive = zipSync({
     "[Content_Types].xml": strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`),
     "_rels/.rels": strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`),
-    "word/document.xml": strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${pageXml}<w:sectPr><w:pgSz w:w="${pageSize.width}" w:h="${pageSize.height}"/><w:pgMar w:top="1021" w:right="1021" w:bottom="1021" w:left="1021"/></w:sectPr></w:body></w:document>`),
+    "word/document.xml": strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${pageXml}${finalSection}</w:body></w:document>`),
   }, { level: 6 });
   return blobFromBytes(archive, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
 }
@@ -249,21 +253,27 @@ function docxTextRun(text: string, style: DocxRunStyle) {
 function buildOdt(manuscript: Manuscript) {
   const dynamicStyles = new Map<string, string>();
   const pages = manuscript.pages.map((item, index) => {
-    const parts = [];
-    if (index > 0) parts.push('<text:p text:style-name="PageBreak"/>');
-    if (item.startsChapter) parts.push(`<text:h text:outline-level="1">${escapeXml(item.chapterTitle)}</text:h>`);
+    const parts = [`<text:p text:style-name="${index === 0 ? "First" : "Next"}-${item.format}"/>`];
     parts.push(...htmlToOdtParagraphs(item.page.content, dynamicStyles));
-    const footer = pageFooter(item.page, item.pageNumber);
+    const footer = pageFooter(manuscript, item.page, item.pageNumber);
     if (footer) parts.push(`<text:p text:style-name="Footer">${escapeXml(footer)}</text:p>`);
     return parts.join("");
   }).join("");
   const automaticStyles = [...dynamicStyles.entries()].map(([properties, name]) => `<style:style style:name="${name}" style:family="text"><style:text-properties ${properties}/></style:style>`).join("");
-  const dimensions = PAGE_DIMENSIONS_MM[manuscript.pages[0]?.format ?? "a4"];
+  const pageStartStyles = Object.keys(PAGE_DIMENSIONS_MM).map((format) =>
+    `<style:style style:name="First-${format}" style:family="paragraph" style:master-page-name="Master-${format}"><style:paragraph-properties fo:margin="0mm" fo:line-height="0.1pt"/><style:text-properties fo:font-size="1pt"/></style:style><style:style style:name="Next-${format}" style:family="paragraph" style:master-page-name="Master-${format}"><style:paragraph-properties fo:break-before="page" fo:margin="0mm" fo:line-height="0.1pt"/><style:text-properties fo:font-size="1pt"/></style:style>`,
+  ).join("");
+  const pageLayouts = Object.entries(PAGE_DIMENSIONS_MM).map(([format, dimensions]) =>
+    `<style:page-layout style:name="Layout-${format}"><style:page-layout-properties fo:page-width="${dimensions.width}mm" fo:page-height="${dimensions.height}mm" fo:margin="18mm"/></style:page-layout>`,
+  ).join("");
+  const masterPages = Object.keys(PAGE_DIMENSIONS_MM).map((format) =>
+    `<style:master-page style:name="Master-${format}" style:page-layout-name="Layout-${format}"/>`,
+  ).join("");
   const archive = zipSync({
     mimetype: strToU8("application/vnd.oasis.opendocument.text"),
     "META-INF/manifest.xml": strToU8(`<?xml version="1.0" encoding="UTF-8"?><manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2"><manifest:file-entry manifest:full-path="/" manifest:media-type="application/vnd.oasis.opendocument.text"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/></manifest:manifest>`),
-    "content.xml": strToU8(`<?xml version="1.0" encoding="UTF-8"?><office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" office:version="1.2"><office:automatic-styles><style:style style:name="PageBreak" style:family="paragraph"><style:paragraph-properties fo:break-before="page"/></style:style><style:style style:name="Footer" style:family="paragraph"><style:paragraph-properties fo:text-align="center"/><style:text-properties fo:font-size="9pt" fo:color="#666666"/></style:style>${automaticStyles}</office:automatic-styles><office:body><office:text>${pages}</office:text></office:body></office:document-content>`),
-    "styles.xml": strToU8(`<?xml version="1.0" encoding="UTF-8"?><office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" office:version="1.2"><office:automatic-styles><style:page-layout style:name="PageLayout"><style:page-layout-properties fo:page-width="${dimensions.width}mm" fo:page-height="${dimensions.height}mm" fo:margin="18mm"/></style:page-layout></office:automatic-styles><office:master-styles><style:master-page style:name="Standard" style:page-layout-name="PageLayout"/></office:master-styles></office:document-styles>`),
+    "content.xml": strToU8(`<?xml version="1.0" encoding="UTF-8"?><office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" office:version="1.2"><office:automatic-styles>${pageStartStyles}<style:style style:name="Footer" style:family="paragraph"><style:paragraph-properties fo:text-align="center"/><style:text-properties fo:font-size="9pt" fo:color="#666666"/></style:style>${automaticStyles}</office:automatic-styles><office:body><office:text>${pages}</office:text></office:body></office:document-content>`),
+    "styles.xml": strToU8(`<?xml version="1.0" encoding="UTF-8"?><office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" office:version="1.2"><office:automatic-styles>${pageLayouts}</office:automatic-styles><office:master-styles>${masterPages}</office:master-styles></office:document-styles>`),
   }, { level: 0 });
   return blobFromBytes(archive, "application/vnd.oasis.opendocument.text");
 }
@@ -361,10 +371,11 @@ function htmlToPlainText(html: string) {
   return (body.textContent ?? "").split("\n").map((line) => line.trim()).filter((line, index, lines) => line || lines[index - 1]).join("\n").trim();
 }
 
-function pageFooter(page: StudioPage, pageNumber: number) {
-  if (page.footerType === "page") return `${pageNumber}`;
-  if (page.footerType === "date") return new Intl.DateTimeFormat("fr-FR", { dateStyle: "long" }).format(new Date());
-  if (page.footerType === "custom") return page.footerText;
+function pageFooter(manuscript: Manuscript, page: StudioPage, pageNumber: number) {
+  if (page.ignoreProjectFooter) return "";
+  if (manuscript.footerType === "page") return `${pageNumber}`;
+  if (manuscript.footerType === "date") return new Intl.DateTimeFormat("fr-FR", { dateStyle: "long" }).format(new Date());
+  if (manuscript.footerType === "custom") return manuscript.footerText;
   return "";
 }
 
@@ -393,6 +404,15 @@ function docxPageSize(format: PageFormat) {
     width: Math.round(dimensions.width / 25.4 * 1440),
     height: Math.round(dimensions.height / 25.4 * 1440),
   };
+}
+
+function docxSectionProperties(format: PageFormat, nextPage = false) {
+  const pageSize = docxPageSize(format);
+  return `<w:sectPr>${nextPage ? '<w:type w:val="nextPage"/>' : ""}<w:pgSz w:w="${pageSize.width}" w:h="${pageSize.height}"/><w:pgMar w:top="1021" w:right="1021" w:bottom="1021" w:left="1021"/></w:sectPr>`;
+}
+
+function docxSectionBreak(format: PageFormat) {
+  return `<w:p><w:pPr>${docxSectionProperties(format, true)}</w:pPr></w:p>`;
 }
 
 function documentTextNode(value: string) {

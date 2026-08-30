@@ -22,6 +22,7 @@ import {
   type QuoteStyle,
   type StudioFont,
   type StudioShortcuts,
+  type WritingColorMode,
 } from "@/lib/studio";
 
 type RichTextEditorProps = {
@@ -29,6 +30,7 @@ type RichTextEditorProps = {
   html: string;
   format: PageFormat;
   backgroundColor?: string;
+  colorMode?: WritingColorMode;
   customFonts: StudioFont[];
   enabledStandardFonts?: string[];
   quoteStyle?: QuoteStyle;
@@ -39,6 +41,11 @@ type RichTextEditorProps = {
   pageNumber?: number;
   onChange: (html: string) => void;
   onPageBreak?: () => void;
+  onOverflow?: (html: string) => void;
+  onNavigatePrevious?: () => void;
+  onNavigateNext?: () => void;
+  navigationLanding?: "top" | "bottom";
+  autoFocus?: boolean;
 };
 
 const allowedElements = new Set([
@@ -71,20 +78,24 @@ function sanitizeHtml(html: string) {
 }
 
 export function RichTextEditor({
-  documentId, html, format, backgroundColor = "#f7f4ed", customFonts,
+  documentId, html, format, backgroundColor = "#ffffff", customFonts,
+  colorMode = "light",
   enabledStandardFonts = STANDARD_FONTS.map((font) => font.id), quoteStyle = "french",
   shortcuts = { save: "Ctrl+S", focus: "Ctrl+Shift+F", pageBreak: "Ctrl+Enter", emDash: "Ctrl+-" },
   characterShortcuts = [], footerType = "none", footerText = "", pageNumber = 1,
-  onChange, onPageBreak = () => undefined,
+  onChange, onPageBreak = () => undefined, onOverflow = () => undefined,
+  onNavigatePrevious, onNavigateNext, navigationLanding = "top", autoFocus = false,
 }: RichTextEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
+  const scrollHostRef = useRef<HTMLDivElement>(null);
   const loadedDocumentId = useRef<string | null>(null);
   const pendingDoublePress = useRef<{ shortcut: string; fallback: string; timer: number } | null>(null);
   const nextFrenchQuoteIsOpening = useRef(true);
+  const wheelLockedUntil = useRef(0);
   const [fillRatio, setFillRatio] = useState(0);
   const formatDefinition = PAGE_FORMATS[format];
   const hasPageLimit = formatDefinition.height !== null;
-  const darkBackground = isDark(backgroundColor);
+  const darkBackground = colorMode === "dark";
   const textColor = darkBackground ? "#eeeaf2" : "#29262b";
   const fonts = [
     ...STANDARD_FONTS.filter((font) => enabledStandardFonts.includes(font.id)),
@@ -104,9 +115,14 @@ export function RichTextEditor({
       nextFrenchQuoteIsOpening.current = true;
       if (pendingDoublePress.current) window.clearTimeout(pendingDoublePress.current.timer);
       pendingDoublePress.current = null;
-      window.requestAnimationFrame(measureFill);
+      window.requestAnimationFrame(() => {
+        measureFill();
+        const scrollHost = scrollHostRef.current;
+        if (scrollHost) scrollHost.scrollTop = navigationLanding === "bottom" ? scrollHost.scrollHeight : 0;
+        if (autoFocus && editorRef.current) placeCaretAtEnd(editorRef.current);
+      });
     }
-  }, [documentId, html, measureFill]);
+  }, [autoFocus, documentId, html, measureFill, navigationLanding]);
 
   useEffect(() => { window.requestAnimationFrame(measureFill); }, [format, footerType, measureFill]);
   useEffect(() => { nextFrenchQuoteIsOpening.current = true; }, [quoteStyle]);
@@ -116,8 +132,10 @@ export function RichTextEditor({
 
   function emitChange() {
     if (!editorRef.current) return;
+    const overflow = hasPageLimit ? extractOverflowHtml(editorRef.current) : "";
     onChange(sanitizeHtml(editorRef.current.innerHTML));
     measureFill();
+    if (overflow) onOverflow(sanitizeHtml(overflow));
   }
 
   function run(command: string, value?: string) {
@@ -188,6 +206,23 @@ export function RichTextEditor({
     }
   }
 
+  function handleWheel(event: React.WheelEvent<HTMLDivElement>) {
+    const now = performance.now();
+    if (now < wheelLockedUntil.current) return;
+    const host = event.currentTarget;
+    const atTop = host.scrollTop <= 2;
+    const atBottom = host.scrollHeight - host.clientHeight - host.scrollTop <= 2;
+    if (event.deltaY < 0 && atTop && onNavigatePrevious) {
+      event.preventDefault();
+      wheelLockedUntil.current = now + 280;
+      onNavigatePrevious();
+    } else if (event.deltaY > 0 && atBottom && onNavigateNext) {
+      event.preventDefault();
+      wheelLockedUntil.current = now + 280;
+      onNavigateNext();
+    }
+  }
+
   const footer = footerType === "page"
     ? `— ${pageNumber} —`
     : footerType === "date"
@@ -234,7 +269,7 @@ export function RichTextEditor({
         <ToolbarButton label="Rétablir" onClick={() => run("redo")}><Redo2 /></ToolbarButton>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto bg-[#09080b] p-4 sm:p-7">
+      <div ref={scrollHostRef} className="min-h-0 flex-1 overflow-auto bg-[#09080b] p-4 sm:p-7" onWheel={handleWheel}>
         <div
           className={`mx-auto flex flex-col overflow-hidden shadow-[0_18px_55px_rgba(0,0,0,.45)] ${hasPageLimit ? "paper-sheet" : "rounded-xl border border-white/8"}`}
           style={{
@@ -246,7 +281,7 @@ export function RichTextEditor({
         >
           <div
             ref={editorRef}
-            className={`studio-editor min-h-0 flex-1 overflow-y-auto px-[clamp(1.5rem,8%,5rem)] py-[clamp(2rem,9%,5rem)] text-[16px] leading-7 outline-none ${darkBackground ? "editor-dark-surface" : "paper-editor"}`}
+            className={`studio-editor min-h-0 flex-1 px-[clamp(1.5rem,8%,5rem)] py-[clamp(2rem,9%,5rem)] text-[16px] leading-7 outline-none ${hasPageLimit ? "overflow-hidden" : "overflow-y-auto"} ${darkBackground ? "editor-dark-surface" : "paper-editor"}`}
             contentEditable role="textbox" aria-label="Contenu de la page" aria-multiline="true"
             suppressContentEditableWarning onInput={emitChange} onKeyDown={handleKeyDown}
           />
@@ -267,10 +302,65 @@ function ToolbarButton({ label, onClick, children }: { label: string; onClick: (
   return <Button aria-label={label} title={label} type="button" variant="ghost" size="icon-sm" className="text-[#aaa4b4] hover:bg-white/7 hover:text-white" onMouseDown={(event) => event.preventDefault()} onClick={onClick}>{children}</Button>;
 }
 
-function isDark(hex: string) {
-  const value = hex.replace("#", "");
-  const red = parseInt(value.slice(0, 2), 16);
-  const green = parseInt(value.slice(2, 4), 16);
-  const blue = parseInt(value.slice(4, 6), 16);
-  return (red * 299 + green * 587 + blue * 114) / 1000 < 145;
+function extractOverflowHtml(editor: HTMLDivElement) {
+  if (editor.scrollHeight <= editor.clientHeight + 1) return "";
+  const bounds = editor.getBoundingClientRect();
+  const paddingBottom = Number.parseFloat(window.getComputedStyle(editor).paddingBottom) || 0;
+  const bottomLimit = bounds.bottom - paddingBottom - 1;
+  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+  let startNode: Text | null = null;
+  let startOffset = 0;
+
+  while (walker.nextNode()) {
+    const textNode = walker.currentNode as Text;
+    if (!textNode.data) continue;
+    const wholeRange = document.createRange();
+    wholeRange.selectNodeContents(textNode);
+    const lastRect = [...wholeRange.getClientRects()].at(-1);
+    if (!lastRect || lastRect.bottom <= bottomLimit) continue;
+
+    let low = 0;
+    let high = textNode.data.length;
+    while (low < high) {
+      const middle = Math.ceil((low + high) / 2);
+      const range = document.createRange();
+      range.setStart(textNode, 0);
+      range.setEnd(textNode, middle);
+      const rect = [...range.getClientRects()].at(-1);
+      if (!rect || rect.bottom <= bottomLimit) low = middle;
+      else high = middle - 1;
+    }
+    startOffset = low;
+    const wordBoundary = Math.max(
+      textNode.data.lastIndexOf(" ", Math.max(0, startOffset - 1)),
+      textNode.data.lastIndexOf("\n", Math.max(0, startOffset - 1)),
+    );
+    if (wordBoundary >= Math.max(0, startOffset - 40)) startOffset = wordBoundary + 1;
+    startNode = textNode;
+    break;
+  }
+
+  const range = document.createRange();
+  if (startNode) range.setStart(startNode, startOffset);
+  else {
+    const overflowingChild = [...editor.children].find((child) => child.getBoundingClientRect().bottom > bottomLimit);
+    if (overflowingChild) range.setStartBefore(overflowingChild);
+    else if (editor.lastChild) range.setStartBefore(editor.lastChild);
+    else return "";
+  }
+  range.setEnd(editor, editor.childNodes.length);
+  const fragment = range.extractContents();
+  const container = document.createElement("div");
+  container.append(fragment);
+  return container.innerHTML;
+}
+
+function placeCaretAtEnd(editor: HTMLDivElement) {
+  editor.focus();
+  const range = document.createRange();
+  range.selectNodeContents(editor);
+  range.collapse(false);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
 }

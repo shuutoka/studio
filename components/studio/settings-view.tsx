@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   Accessibility,
   Download,
@@ -24,9 +24,12 @@ import { Input } from "@/components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-import { createDefaultSettings, createId, STANDARD_FONTS, type StudioSettings } from "@/lib/studio";
+import { playInterfaceSound } from "@/lib/interface-sound";
+import {
+  createDefaultSettings, createId, STANDARD_FONTS, type StudioSettings,
+  type WritingColorMode,
+} from "@/lib/studio";
 import { isModifierKey, shortcutFromEvent } from "@/lib/shortcuts";
 
 type SettingsSection = "backup" | "fonts" | "appearance" | "writing";
@@ -45,6 +48,7 @@ export function SettingsView({
   const [section, setSection] = useState<SettingsSection>("backup");
   const [allColor, setAllColor] = useState(settings.paperBackground);
   const [zoomDraft, setZoomDraft] = useState<number | null>(null);
+  const zoomDraftRef = useRef(settings.zoom);
   const sections = [
     { id: "backup" as const, label: "Sauvegarde", icon: FileArchive },
     { id: "fonts" as const, label: "Polices d’écriture", icon: Type },
@@ -135,35 +139,50 @@ export function SettingsView({
                     </div>
                   </Field>
                   <Field label={`Zoom de l’interface — ${zoomDraft ?? settings.zoom} %`}>
-                    <div className="flex items-center gap-4">
-                      <Slider
-                        min={75}
-                        max={150}
-                        step={5}
-                        value={[zoomDraft ?? settings.zoom]}
-                        onValueChange={(values) => { if (typeof values[0] === "number") setZoomDraft(values[0]); }}
-                        onValueCommit={(values) => {
-                          const value = values[0];
-                          if (typeof value === "number") updateSettings((draft) => { draft.zoom = value; });
-                          setZoomDraft(null);
-                        }}
-                      />
-                      <Button size="sm" variant="outline" className="border-white/10 bg-transparent" onClick={() => { setZoomDraft(null); updateSettings((draft) => { draft.zoom = 100; }); }}>100 %</Button>
+                    <div className="grid gap-3">
+                      <div className="flex items-center gap-4">
+                        <input
+                          aria-label="Zoom de l’interface"
+                          type="range"
+                          min={75}
+                          max={150}
+                          step={5}
+                          value={zoomDraft ?? settings.zoom}
+                          className="h-2 min-w-0 flex-1 cursor-pointer accent-[#ef4f5f]"
+                          onChange={(event) => {
+                            const value = Number(event.target.value);
+                            zoomDraftRef.current = value;
+                            setZoomDraft(value);
+                          }}
+                          onPointerUp={() => {
+                            const value = zoomDraftRef.current;
+                            updateSettings((draft) => { draft.zoom = value; });
+                            setZoomDraft(null);
+                          }}
+                          onKeyUp={() => {
+                            const value = zoomDraftRef.current;
+                            updateSettings((draft) => { draft.zoom = value; });
+                            setZoomDraft(null);
+                          }}
+                        />
+                        <span className="w-12 text-right font-mono text-xs text-[#c8c2cf]">{zoomDraft ?? settings.zoom} %</span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">{[75, 90, 100, 125, 150].map((value) => <Button key={value} size="sm" variant={settings.zoom === value ? "default" : "outline"} className={settings.zoom === value ? "bg-[#ef4f5f] text-white" : "border-white/10 bg-transparent"} onClick={() => { zoomDraftRef.current = value; setZoomDraft(null); updateSettings((draft) => { draft.zoom = value; }); }}>{value} %</Button>)}</div>
                     </div>
                   </Field>
                   <Field label="Son des boutons">
-                    <Select value={settings.interfaceSound} onValueChange={(value: StudioSettings["interfaceSound"]) => updateSettings((draft) => { draft.interfaceSound = value; })}>
+                    <Select value={settings.interfaceSound} onValueChange={(value: StudioSettings["interfaceSound"]) => { updateSettings((draft) => { draft.interfaceSound = value; }); playInterfaceSound(value); }}>
                       <SelectTrigger className="w-full border-white/10 bg-black/20 sm:w-72"><Volume2 className="size-4" /><SelectValue /></SelectTrigger>
                       <SelectContent><SelectItem value="none">Aucun</SelectItem><SelectItem value="soft">Doux</SelectItem><SelectItem value="mechanical">Mécanique</SelectItem><SelectItem value="digital">Numérique</SelectItem></SelectContent>
                     </Select>
                   </Field>
                   <div className="grid gap-4 rounded-xl border border-white/8 bg-black/15 p-4 sm:grid-cols-2">
-                    <ColorField label="Fond du mode libre" value={settings.freeBackground} onChange={(value) => updateSettings((draft) => { draft.freeBackground = value; })} />
-                    <ColorField label="Fond des feuilles" value={settings.paperBackground} onChange={(value) => updateSettings((draft) => { draft.paperBackground = value; })} />
+                    <ColorField label="Fond du mode libre" value={settings.freeBackground} mode={settings.freeColorMode} onChange={(value) => updateSettings((draft) => { draft.freeBackground = value; draft.freeColorMode = colorModeFor(value); })} onModeChange={(mode) => updateSettings((draft) => { draft.freeColorMode = mode; draft.freeBackground = mode === "light" ? "#ffffff" : "#15131a"; })} />
+                    <ColorField label="Fond des feuilles" value={settings.paperBackground} mode={settings.paperColorMode} onChange={(value) => updateSettings((draft) => { draft.paperBackground = value; draft.paperColorMode = colorModeFor(value); })} onModeChange={(mode) => updateSettings((draft) => { draft.paperColorMode = mode; draft.paperBackground = mode === "light" ? "#ffffff" : "#15131a"; })} />
                     <div className="sm:col-span-2 flex flex-wrap items-end gap-2 border-t border-white/7 pt-4">
                       <ColorField label="Modifier tous les fonds" value={allColor} onChange={setAllColor} compact />
-                      <Button variant="outline" className="border-white/10 bg-transparent" onClick={() => updateSettings((draft) => { draft.freeBackground = allColor; draft.paperBackground = allColor; })}>Appliquer à tous</Button>
-                      <Button variant="ghost" onClick={() => updateSettings((draft) => { const defaults = createDefaultSettings(); draft.freeBackground = defaults.freeBackground; draft.paperBackground = defaults.paperBackground; draft.customColors = []; })}><RotateCcw /> Restaurer</Button>
+                      <Button variant="outline" className="border-white/10 bg-transparent" onClick={() => updateSettings((draft) => { const mode = colorModeFor(allColor); draft.freeBackground = allColor; draft.paperBackground = allColor; draft.freeColorMode = mode; draft.paperColorMode = mode; })}>Appliquer à tous</Button>
+                      <Button variant="ghost" onClick={() => updateSettings((draft) => { const defaults = createDefaultSettings(); draft.freeBackground = defaults.freeBackground; draft.paperBackground = defaults.paperBackground; draft.freeColorMode = defaults.freeColorMode; draft.paperColorMode = defaults.paperColorMode; draft.customColors = []; })}><RotateCcw /> Restaurer</Button>
                     </div>
                   </div>
                   <Field label={`Couleurs personnalisées — ${settings.customColors.length}/3`}>
@@ -245,8 +264,16 @@ function FontRow({ name, family, badge, enabled, onToggle, onDelete }: { name: s
   return <div className="flex items-center gap-3 rounded-xl border border-white/8 bg-black/15 p-3"><span className="grid size-9 place-items-center rounded-lg bg-white/5 text-lg text-white" style={{ fontFamily: family }}>Aa</span><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><span className="truncate text-sm font-medium text-white">{name}</span><span className="rounded-full bg-white/5 px-2 py-0.5 text-[9px] uppercase tracking-wide text-[#77717f]">{badge}</span></div><p className="mt-0.5 truncate text-xs text-[#77717f]" style={{ fontFamily: family }}>Aperçu de la police d’écriture</p></div><Switch checked={enabled} onCheckedChange={onToggle} />{onDelete && <Button aria-label={`Supprimer ${name}`} size="icon-sm" variant="ghost" className="text-[#77717f] hover:text-[#ff7885]" onClick={onDelete}><Trash2 /></Button>}</div>;
 }
 
-function ColorField({ label, value, onChange, compact = false }: { label: string; value: string; onChange: (value: string) => void; compact?: boolean }) {
-  return <div className={`grid gap-2 text-xs font-medium text-[#aaa4b4] ${compact ? "min-w-44" : ""}`}><span>{label}</span><span className="flex items-center gap-2 rounded-lg border border-white/9 bg-black/20 p-2"><ColorPicker label={label} value={value} onChange={onChange} /><span className="font-mono text-xs text-[#c8c2cf]">{value.toUpperCase()}</span></span></div>;
+function ColorField({ label, value, onChange, mode, onModeChange, compact = false }: { label: string; value: string; onChange: (value: string) => void; mode?: WritingColorMode; onModeChange?: (mode: WritingColorMode) => void; compact?: boolean }) {
+  return <div className={`grid gap-2 text-xs font-medium text-[#aaa4b4] ${compact ? "min-w-44" : ""}`}><span>{label}</span>{mode && onModeChange && <span className="grid grid-cols-2 gap-1 rounded-lg border border-white/9 bg-black/20 p-1">{(["light", "dark"] as const).map((value) => <button key={value} type="button" className={`rounded-md px-2 py-1.5 text-xs transition ${mode === value ? "bg-[#ef4f5f] text-white" : "text-[#8f8996] hover:bg-white/5"}`} onClick={() => onModeChange(value)}>{value === "light" ? "Mode clair" : "Mode sombre"}</button>)}</span>}<span className="flex items-center gap-2 rounded-lg border border-white/9 bg-black/20 p-2"><ColorPicker label={label} value={value} onChange={onChange} /><span className="font-mono text-xs text-[#c8c2cf]">{value.toUpperCase()}</span></span></div>;
+}
+
+function colorModeFor(color: string): WritingColorMode {
+  const value = color.replace("#", "");
+  const red = Number.parseInt(value.slice(0, 2), 16);
+  const green = Number.parseInt(value.slice(2, 4), 16);
+  const blue = Number.parseInt(value.slice(4, 6), 16);
+  return (red * 299 + green * 587 + blue * 114) / 1000 < 145 ? "dark" : "light";
 }
 
 function InfoBox({ icon: Icon, children }: { icon: typeof Download; children: React.ReactNode }) {

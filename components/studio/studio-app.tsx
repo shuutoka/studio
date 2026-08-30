@@ -116,7 +116,7 @@ import {
   type StudioVolume,
 } from "@/lib/studio";
 import {
-  exportProjectWriting, getManuscriptFilename, getWrittenPageCount,
+  exportProjectWriting, getManuscriptFilename, getManuscriptPageCount,
   type WritingExportFormat,
 } from "@/lib/writing-export";
 
@@ -834,7 +834,7 @@ function WritingExportButton({ project }: { project: StudioProject }) {
   const selectedVolumeId = project.volumes.some((volume) => volume.id === volumeId)
     ? volumeId
     : project.volumes[0]?.id ?? "";
-  const writtenPageCount = selectedVolumeId ? getWrittenPageCount(project, selectedVolumeId) : 0;
+  const manuscriptPageCount = selectedVolumeId ? getManuscriptPageCount(project, selectedVolumeId) : 0;
 
   function startExport() {
     if (!selectedVolumeId) return;
@@ -853,13 +853,13 @@ function WritingExportButton({ project }: { project: StudioProject }) {
       <DialogContent className="border-white/10 bg-[#17151d] text-[#eeeaf2]">
         <DialogHeader>
           <DialogTitle>Exporter un manuscrit</DialogTitle>
-          <DialogDescription className="text-[#9c96a5]">Choisissez le volume à exporter. Seules ses pages contenant du texte seront incluses.</DialogDescription>
+          <DialogDescription className="text-[#9c96a5]">Choisissez le volume à exporter. Toutes ses pages seront conservées, y compris les pages vides et les sauts de page.</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
           <Field label="Manuscrit à exporter">
             <Select value={selectedVolumeId} onValueChange={setVolumeId} disabled={!project.volumes.length}>
               <SelectTrigger className="w-full border-white/10 bg-white/4"><SelectValue placeholder="Aucun volume" /></SelectTrigger>
-              <SelectContent>{project.volumes.map((volume) => <SelectItem key={volume.id} value={volume.id}>{volume.title} — {getWrittenPageCount(project, volume.id)} page(s) écrite(s)</SelectItem>)}</SelectContent>
+              <SelectContent>{project.volumes.map((volume) => <SelectItem key={volume.id} value={volume.id}>{volume.title} — {getManuscriptPageCount(project, volume.id)} page(s)</SelectItem>)}</SelectContent>
             </Select>
           </Field>
           <Field label="Format du document">
@@ -868,9 +868,9 @@ function WritingExportButton({ project }: { project: StudioProject }) {
               <SelectContent><SelectItem value="docx">Word .docx</SelectItem><SelectItem value="doc">Word ancien .doc</SelectItem><SelectItem value="odt">OpenDocument .odt</SelectItem><SelectItem value="pdf">PDF .pdf — via impression</SelectItem><SelectItem value="html">Page web .html</SelectItem><SelectItem value="txt">Texte brut .txt</SelectItem></SelectContent>
             </Select>
           </Field>
-          {selectedVolumeId && <p className="rounded-lg border border-white/8 bg-black/15 px-3 py-2 text-xs text-[#8f8996]">Fichier : <span className="font-mono text-[#c8c2cf]">{getManuscriptFilename(project, selectedVolumeId)}.{format}</span> · {writtenPageCount} page{writtenPageCount > 1 ? "s" : ""}</p>}
+          {selectedVolumeId && <p className="rounded-lg border border-white/8 bg-black/15 px-3 py-2 text-xs text-[#8f8996]">Fichier : <span className="font-mono text-[#c8c2cf]">{getManuscriptFilename(project, selectedVolumeId)}.{format}</span> · {manuscriptPageCount} page{manuscriptPageCount > 1 ? "s" : ""}</p>}
         </div>
-        <DialogFooter><Button variant="ghost" onClick={() => setOpen(false)}>Annuler</Button><Button className="bg-[#ef4f5f] text-white" disabled={!selectedVolumeId || writtenPageCount === 0} onClick={startExport}><FileDown /> Exporter</Button></DialogFooter>
+        <DialogFooter><Button variant="ghost" onClick={() => setOpen(false)}>Annuler</Button><Button className="bg-[#ef4f5f] text-white" disabled={!selectedVolumeId || manuscriptPageCount === 0} onClick={startExport}><FileDown /> Exporter</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   </>;

@@ -84,9 +84,9 @@ test("renders sidebar skeletons deterministically", async () => {
   assert.match(first, /--skeleton-width:70%/);
 });
 
-test("exports only written pages from the selected manuscript", async () => {
+test("exports every page from the selected manuscript, including blank pages", async () => {
   const { createBlankProject, createEmptyPage } = await vite.ssrLoadModule("/lib/studio.ts");
-  const { getManuscriptFilename, getWrittenPageCount } = await vite.ssrLoadModule("/lib/writing-export.ts");
+  const { getManuscriptFilename, getManuscriptPageCount } = await vite.ssrLoadModule("/lib/writing-export.ts");
   const project = createBlankProject("Projet Démon", "novel");
   const volume = project.volumes[0];
   volume.title = "Volume Été";
@@ -94,8 +94,35 @@ test("exports only written pages from the selected manuscript", async () => {
   volume.chapters[0].pages.push(createEmptyPage(2));
   volume.chapters[0].pages.push({ ...createEmptyPage(3), content: "<p><br></p>" });
 
-  assert.equal(getWrittenPageCount(project, volume.id), 1);
+  assert.equal(getManuscriptPageCount(project, volume.id), 3);
   assert.equal(getManuscriptFilename(project, volume.id), "Projet-Demon-Volume-Ete");
+});
+
+test("migrates the former cream paper and page footer settings", async () => {
+  const {
+    createBlankProject, createDefaultSettings, normalizeProject, normalizeSettings,
+  } = await vite.ssrLoadModule("/lib/studio.ts");
+  const legacySettings = createDefaultSettings();
+  legacySettings.schemaVersion = 1;
+  legacySettings.zoom = 125;
+  legacySettings.paperBackground = "#F7F4ED";
+
+  const normalizedSettings = normalizeSettings(legacySettings);
+  assert.equal(normalizedSettings.zoom, 125);
+  assert.equal(normalizedSettings.paperBackground, "#ffffff");
+  assert.equal(normalizedSettings.paperColorMode, "light");
+
+  const legacyProject = createBlankProject("Ancien projet", "novel");
+  legacyProject.schemaVersion = 3;
+  delete legacyProject.footerType;
+  delete legacyProject.footerText;
+  legacyProject.volumes[0].chapters[0].pages[0].footerType = "custom";
+  legacyProject.volumes[0].chapters[0].pages[0].footerText = "Brouillon confidentiel";
+
+  const normalizedProject = normalizeProject(legacyProject);
+  assert.equal(normalizedProject.footerType, "custom");
+  assert.equal(normalizedProject.footerText, "Brouillon confidentiel");
+  assert.equal(normalizedProject.volumes[0].chapters[0].pages[0].ignoreProjectFooter, false);
 });
 
 test("the writing toolbar uses the bounded color picker", async () => {

@@ -140,6 +140,8 @@ textarea {
 }
 
 .studio-shell {
+  min-height: var(--studio-viewport-height, 100svh);
+  zoom: var(--studio-zoom, 1);
   background:
     radial-gradient(circle at 88% -12%, rgba(121, 43, 57, 0.15), transparent 33rem),
     #0c0b0f;

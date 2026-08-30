@@ -105,8 +105,14 @@ export function StudioAppV3() {
 
   useEffect(() => {
     document.documentElement.dataset.studioTheme = settings.theme;
-    document.documentElement.style.fontSize = `${settings.zoom}%`;
-    return () => { delete document.documentElement.dataset.studioTheme; document.documentElement.style.fontSize = ""; };
+    const scale = settings.zoom / 100;
+    document.documentElement.style.setProperty("--studio-zoom", `${scale}`);
+    document.documentElement.style.setProperty("--studio-viewport-height", `${100 / scale}svh`);
+    return () => {
+      delete document.documentElement.dataset.studioTheme;
+      document.documentElement.style.removeProperty("--studio-zoom");
+      document.documentElement.style.removeProperty("--studio-viewport-height");
+    };
   }, [settings.theme, settings.zoom]);
 
   useEffect(() => {
