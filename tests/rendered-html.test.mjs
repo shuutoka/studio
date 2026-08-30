@@ -28,7 +28,8 @@ test("renders the static studio shell", async () => {
   );
   const html = await response.text();
   assert.match(html, /<title>Enfer Fatal Studio<\/title>/i);
-  assert.match(html, />Bibliothèque</i);
+  assert.match(html, />Visionneuse</i);
+  assert.match(html, />Paramètres</i);
   assert.doesNotMatch(html, /Bonjour, Mon Empereur\./i);
   assert.doesNotMatch(html, /Commencez à écrire ici/i);
 });

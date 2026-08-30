@@ -227,6 +227,13 @@ textarea {
   color: #68616d;
 }
 
+.editor-dark-surface h1,
+.editor-dark-surface h2,
+.editor-dark-surface h3,
+.editor-dark-surface blockquote {
+  color: inherit;
+}
+
 .paper-editor hr {
   border-top-color: rgba(41, 38, 43, 0.16);
 }
@@ -257,6 +264,92 @@ textarea {
 
 .studio-editor font[size="7"] {
   font-size: 2.5rem;
+}
+
+[data-studio-theme="dark"] body,
+[data-studio-theme="dark"] .studio-shell,
+[data-studio-theme="dark"] .studio-page {
+  background-color: #050507;
+}
+
+[data-studio-theme="dark"] [class~="bg-[#131218]"],
+[data-studio-theme="dark"] [class~="bg-[#17151d]"],
+[data-studio-theme="dark"] [class~="bg-[#111015]"],
+[data-studio-theme="dark"] [class~="bg-[#100f14]"] {
+  background-color: #0b0a0e !important;
+}
+
+[data-studio-theme="light"] {
+  color-scheme: light;
+  --foreground: #302b34;
+  --card: #ffffff;
+  --card-foreground: #302b34;
+  --popover: #ffffff;
+  --popover-foreground: #302b34;
+  --secondary: #eee9ef;
+  --secondary-foreground: #302b34;
+  --muted: #eee9ef;
+  --muted-foreground: #6e6672;
+  --accent: #eee9ef;
+  --accent-foreground: #302b34;
+  --border: #302b341f;
+  --input: #302b3426;
+  --sidebar: #f3eff4;
+  --sidebar-foreground: #514a55;
+  --sidebar-accent: #e9e3eb;
+  --sidebar-accent-foreground: #241f27;
+  --sidebar-border: #302b341a;
+}
+
+[data-studio-theme="light"] body,
+[data-studio-theme="light"] .studio-shell,
+[data-studio-theme="light"] .studio-page {
+  background-color: #f5f2f5 !important;
+  color: #302b34 !important;
+}
+
+[data-studio-theme="light"] .studio-page {
+  background-image:
+    linear-gradient(rgba(48, 43, 52, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(48, 43, 52, 0.025) 1px, transparent 1px);
+}
+
+[data-studio-theme="light"] [class~="bg-[#131218]"],
+[data-studio-theme="light"] [class~="bg-[#17151d]"],
+[data-studio-theme="light"] [class~="bg-[#111015]"],
+[data-studio-theme="light"] [class~="bg-[#100f14]"],
+[data-studio-theme="light"] [class~="bg-[#111016]"] {
+  background-color: #ffffff !important;
+}
+
+[data-studio-theme="light"] [class~="bg-[#0c0b0f]/92"] {
+  background-color: rgba(245, 242, 245, 0.94) !important;
+}
+
+[data-studio-theme="light"] [class~="text-white"],
+[data-studio-theme="light"] [class~="text-[#eeeaf2]"],
+[data-studio-theme="light"] [class~="text-[#ddd8e5]"],
+[data-studio-theme="light"] [class~="text-[#dcd7e3]"],
+[data-studio-theme="light"] [class~="text-[#c8c2cf]"] {
+  color: #302b34 !important;
+}
+
+[data-studio-theme="light"] [class~="text-[#77717f]"],
+[data-studio-theme="light"] [class~="text-[#8f8996]"],
+[data-studio-theme="light"] [class~="text-[#96909e]"],
+[data-studio-theme="light"] [class~="text-[#aaa4b4]"] {
+  color: #6e6672 !important;
+}
+
+[data-studio-theme="light"] [class~="bg-[#ef4f5f]"],
+[data-studio-theme="light"] [class~="bg-[#ef4f5f]"] [class~="text-white"] {
+  color: #ffffff !important;
+}
+
+[data-studio-theme="light"] [class~="bg-black/20"],
+[data-studio-theme="light"] [class~="bg-black/15"],
+[data-studio-theme="light"] [class~="bg-black/18"] {
+  background-color: rgba(48, 43, 52, 0.045) !important;
 }
 
 @media (max-width: 767px) {

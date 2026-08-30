@@ -3,6 +3,12 @@ export type PageStatus = "draft" | "review" | "done";
 export type ProjectType = "manga" | "novel" | "script" | "free";
 export type PageFormat = "free" | "a4" | "a5" | "pocket" | "novel" | "large";
 export type GoalStatus = "todo" | "doing" | "done";
+export type BackupExtension = "efs" | "zip";
+export type AppTheme = "normal" | "dark" | "light";
+export type InterfaceSound = "none" | "soft" | "mechanical" | "digital";
+export type QuoteStyle = "straight" | "french";
+export type FooterType = "none" | "page" | "date" | "custom";
+export type ShortcutPressMode = "single" | "double";
 
 export const PROJECT_TYPE_LABELS: Record<ProjectType, string> = {
   manga: "Manga / BD",
@@ -23,6 +29,15 @@ export const PAGE_FORMATS: Record<
   large: { label: "Grand format", detail: "170 × 240 mm", width: 620, height: 875 },
 };
 
+export const STANDARD_FONTS = [
+  { id: "arial", label: "Arial", family: "Arial" },
+  { id: "georgia", label: "Georgia", family: "Georgia" },
+  { id: "times", label: "Times New Roman", family: "Times New Roman" },
+  { id: "verdana", label: "Verdana", family: "Verdana" },
+  { id: "trebuchet", label: "Trebuchet MS", family: "Trebuchet MS" },
+  { id: "courier", label: "Courier New", family: "Courier New" },
+] as const;
+
 export type StudioPage = {
   id: string;
   title: string;
@@ -30,19 +45,13 @@ export type StudioPage = {
   status: PageStatus;
   typeOverride: ProjectType | null;
   formatOverride: PageFormat | null;
+  backgroundOverride: string | null;
+  footerType: FooterType;
+  footerText: string;
 };
 
-export type StudioChapter = {
-  id: string;
-  title: string;
-  pages: StudioPage[];
-};
-
-export type StudioVolume = {
-  id: string;
-  title: string;
-  chapters: StudioChapter[];
-};
+export type StudioChapter = { id: string; title: string; pages: StudioPage[] };
+export type StudioVolume = { id: string; title: string; chapters: StudioChapter[] };
 
 export type CharacterRelation = {
   id: string;
@@ -75,24 +84,15 @@ export type StudioCharacter = {
   relations: CharacterRelation[];
 };
 
-export type StudioNote = {
-  id: string;
-  title: string;
-  content: string;
-};
-
-export type StudioGoal = {
-  id: string;
-  title: string;
-  description: string;
-  status: GoalStatus;
-};
+export type StudioNote = { id: string; title: string; content: string };
+export type StudioGoal = { id: string; title: string; description: string; status: GoalStatus };
 
 export type StudioFont = {
   id: string;
   name: string;
   family: string;
   mediaId: string;
+  enabled: boolean;
 };
 
 export type StudioMedia = {
@@ -105,8 +105,42 @@ export type StudioMedia = {
   blob: Blob;
 };
 
+export type CharacterShortcut = {
+  id: string;
+  character: string;
+  shortcut: string;
+  pressMode: ShortcutPressMode;
+};
+
+export type StudioShortcuts = {
+  save: string;
+  focus: string;
+  pageBreak: string;
+  emDash: string;
+};
+
+export type StudioSettings = {
+  schemaVersion: 1;
+  id: "studio-settings";
+  revision: number;
+  savedRevision: number;
+  backupExtension: BackupExtension;
+  backupFilename: string;
+  theme: AppTheme;
+  zoom: number;
+  interfaceSound: InterfaceSound;
+  enabledStandardFonts: string[];
+  customFonts: StudioFont[];
+  freeBackground: string;
+  paperBackground: string;
+  customColors: string[];
+  quoteStyle: QuoteStyle;
+  shortcuts: StudioShortcuts;
+  characterShortcuts: CharacterShortcut[];
+};
+
 export type StudioProject = {
-  schemaVersion: 2;
+  schemaVersion: 3;
   id: string;
   name: string;
   description: string;
@@ -122,6 +156,7 @@ export type StudioProject = {
   characters: StudioCharacter[];
   notes: StudioNote[];
   goals: StudioGoal[];
+  /** Kept for migration from v2 saves. New fonts live in StudioSettings. */
   customFonts: StudioFont[];
 };
 
@@ -145,41 +180,122 @@ export function createId(prefix: string) {
   return `${prefix}-${random}`;
 }
 
+export function createDefaultSettings(): StudioSettings {
+  return {
+    schemaVersion: 1,
+    id: "studio-settings",
+    revision: 1,
+    savedRevision: 1,
+    backupExtension: "efs",
+    backupFilename: "enfer-fatal-studio",
+    theme: "normal",
+    zoom: 100,
+    interfaceSound: "none",
+    enabledStandardFonts: STANDARD_FONTS.map((font) => font.id),
+    customFonts: [],
+    freeBackground: "#15131a",
+    paperBackground: "#f7f4ed",
+    customColors: [],
+    quoteStyle: "french",
+    shortcuts: {
+      save: "Ctrl+S",
+      focus: "Ctrl+Shift+F",
+      pageBreak: "Ctrl+Enter",
+      emDash: "Ctrl+-",
+    },
+    characterShortcuts: [],
+  };
+}
+
+export function normalizeSettings(value: unknown): StudioSettings {
+  const defaults = createDefaultSettings();
+  if (!value || typeof value !== "object") return defaults;
+  const input = value as Partial<StudioSettings>;
+  const validStandardIds = new Set<string>(STANDARD_FONTS.map((font) => font.id));
+  const revision = Number.isFinite(input.revision) ? Math.max(1, Number(input.revision)) : 1;
+  return {
+    ...defaults,
+    revision,
+    savedRevision: Number.isFinite(input.savedRevision) ? Number(input.savedRevision) : revision,
+    backupExtension: input.backupExtension === "zip" ? "zip" : "efs",
+    backupFilename:
+      typeof input.backupFilename === "string" && input.backupFilename.trim()
+        ? input.backupFilename.trim()
+        : defaults.backupFilename,
+    theme: ["normal", "dark", "light"].includes(input.theme ?? "")
+      ? input.theme as AppTheme
+      : defaults.theme,
+    zoom: Number.isFinite(input.zoom) ? Math.min(150, Math.max(75, Number(input.zoom))) : 100,
+    interfaceSound: ["none", "soft", "mechanical", "digital"].includes(input.interfaceSound ?? "")
+      ? input.interfaceSound as InterfaceSound
+      : "none",
+    enabledStandardFonts: Array.isArray(input.enabledStandardFonts)
+      ? input.enabledStandardFonts.filter((id): id is string => typeof id === "string" && validStandardIds.has(id))
+      : defaults.enabledStandardFonts,
+    customFonts: Array.isArray(input.customFonts)
+      ? input.customFonts.flatMap((font) => {
+          if (
+            typeof font?.id !== "string" || typeof font.name !== "string" ||
+            typeof font.family !== "string" || typeof font.mediaId !== "string"
+          ) return [];
+          return [{ ...font, enabled: font.enabled !== false }];
+        })
+      : [],
+    freeBackground: normalizeColor(input.freeBackground, defaults.freeBackground),
+    paperBackground: normalizeColor(input.paperBackground, defaults.paperBackground),
+    customColors: Array.isArray(input.customColors)
+      ? input.customColors.flatMap((color) => normalizeColor(color, "") ? [color] : []).slice(0, 3)
+      : [],
+    quoteStyle: input.quoteStyle === "straight" ? "straight" : "french",
+    shortcuts: {
+      save: normalizeShortcut(input.shortcuts?.save, defaults.shortcuts.save),
+      focus: normalizeShortcut(input.shortcuts?.focus, defaults.shortcuts.focus),
+      pageBreak: normalizeShortcut(input.shortcuts?.pageBreak, defaults.shortcuts.pageBreak),
+      emDash: normalizeShortcut(input.shortcuts?.emDash, defaults.shortcuts.emDash),
+    },
+    characterShortcuts: Array.isArray(input.characterShortcuts)
+      ? input.characterShortcuts.flatMap((binding) => {
+          if (
+            typeof binding?.id !== "string" || typeof binding.character !== "string" ||
+            !binding.character || typeof binding.shortcut !== "string" || !binding.shortcut
+          ) return [];
+          return [{
+            id: binding.id,
+            character: binding.character,
+            shortcut: binding.shortcut,
+            pressMode: binding.pressMode === "double" ? "double" as const : "single" as const,
+          }];
+        })
+      : [],
+  };
+}
+
+function normalizeShortcut(value: unknown, fallback: string) {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function normalizeColor(value: unknown, fallback: string) {
+  return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
+}
+
 export function createEmptyPage(index = 1): StudioPage {
   return {
-    id: createId("page"),
-    title: `Page ${index}`,
-    content: "",
-    status: "draft",
-    typeOverride: null,
-    formatOverride: null,
+    id: createId("page"), title: `Page ${index}`, content: "", status: "draft",
+    typeOverride: null, formatOverride: null, backgroundOverride: null,
+    footerType: "none", footerText: "",
   };
 }
 
 export function createEmptyCharacter(name = "Nouveau personnage"): StudioCharacter {
   return {
-    id: createId("character"),
-    name,
-    role: "",
-    age: "",
-    species: "",
-    description: "",
-    appearance: "",
-    personality: "",
-    objectives: "",
-    notes: "",
-    tags: [],
-    imageIds: [],
-    outfits: [],
-    relations: [],
+    id: createId("character"), name, role: "", age: "", species: "", description: "",
+    appearance: "", personality: "", objectives: "", notes: "", tags: [], imageIds: [],
+    outfits: [], relations: [],
   };
 }
 
 export function stripHtml(html: string) {
-  if (typeof document === "undefined") {
-    return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-  }
-
+  if (typeof document === "undefined") return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
   const container = document.createElement("div");
   container.innerHTML = html;
   return (container.textContent ?? "").replace(/\s+/g, " ").trim();
@@ -194,167 +310,76 @@ export function getProjectStats(project: StudioProject): ProjectStats {
     return total + (text ? text.split(/\s+/).length : 0);
   }, 0);
   const progressBase = project.targetPages > 0 ? project.targetPages : pages.length;
-
   return {
-    volumes: project.volumes.length,
-    chapters: chapters.length,
-    pages: pages.length,
-    completedPages,
-    characters: project.characters.length,
-    notes: project.notes.length,
-    words,
-    progress:
-      progressBase > 0
-        ? Math.min(100, Math.round((completedPages / progressBase) * 100))
-        : 0,
+    volumes: project.volumes.length, chapters: chapters.length, pages: pages.length,
+    completedPages, characters: project.characters.length, notes: project.notes.length, words,
+    progress: progressBase > 0 ? Math.min(100, Math.round((completedPages / progressBase) * 100)) : 0,
     completedGoals: project.goals.filter((goal) => goal.status === "done").length,
   };
 }
 
-export function createBlankProject(
-  name: string,
-  projectType: ProjectType = "manga",
-): StudioProject {
+export function createBlankProject(name: string, projectType: ProjectType = "manga"): StudioProject {
   const now = new Date().toISOString();
   return {
-    schemaVersion: 2,
-    id: createId("project"),
-    name: name.trim() || "Projet sans titre",
-    description: "",
-    status: "idea",
-    projectType,
+    schemaVersion: 3, id: createId("project"), name: name.trim() || "Projet sans titre",
+    description: "", status: "idea", projectType,
     defaultPageFormat: projectType === "novel" ? "novel" : projectType === "free" ? "free" : "a4",
-    targetPages: 0,
-    createdAt: now,
-    updatedAt: now,
-    revision: 1,
-    savedRevision: 0,
-    volumes: [
-      {
-        id: createId("volume"),
-        title: "Volume 1",
-        chapters: [
-          {
-            id: createId("chapter"),
-            title: "Chapitre 1",
-            pages: [createEmptyPage()],
-          },
-        ],
-      },
-    ],
-    characters: [],
-    notes: [],
-    goals: [],
-    customFonts: [],
+    targetPages: 0, createdAt: now, updatedAt: now, revision: 1, savedRevision: 0,
+    volumes: [{
+      id: createId("volume"), title: "Volume 1",
+      chapters: [{ id: createId("chapter"), title: "Chapitre 1", pages: [createEmptyPage()] }],
+    }],
+    characters: [], notes: [], goals: [], customFonts: [],
   };
 }
 
 export function createDemoProject(): StudioProject {
-  const now = new Date().toISOString();
-  return {
-    schemaVersion: 2,
-    id: "project-demo-enfer-fatal",
-    name: "Enfer Fatal",
-    description:
-      "Projet de démonstration. Explorez le Studio, puis créez votre propre projet depuis l’accueil.",
-    status: "draft",
-    projectType: "manga",
-    defaultPageFormat: "a4",
-    targetPages: 24,
-    createdAt: now,
-    updatedAt: now,
-    revision: 1,
-    savedRevision: 1,
-    volumes: [
-      {
-        id: "volume-demo-1",
-        title: "Volume 1",
-        chapters: [
-          {
-            id: "chapter-demo-1",
-            title: "Chapitre 1 — Une journée ordinaire en enfer",
-            pages: [
-              {
-                id: "page-demo-1",
-                title: "Page 1",
-                status: "draft",
-                typeOverride: null,
-                formatOverride: null,
-                content:
-                  "<h2>Ouverture</h2><p><strong>Plan général :</strong> les tours infernales dominent la ville sous un ciel rougeoyant.</p><p><em>Narration :</em> Même l’Enfer a besoin d’une bonne direction.</p>",
-              },
-              {
-                id: "page-demo-2",
-                title: "Page 2",
-                status: "done",
-                typeOverride: null,
-                formatOverride: null,
-                content:
-                  "<p>Lucy traverse les bureaux, un café à la main. Les employés s’écartent sur son passage.</p><p><strong>Lucy :</strong> Le rapport des âmes, sur mon bureau avant midi.</p>",
-              },
-            ],
-          },
-        ],
-      },
-    ],
-    characters: [
-      {
-        ...createEmptyCharacter("Lucy"),
-        id: "character-demo-lucy",
-        role: "Protagoniste — CEO des Enfers",
-        species: "Démone",
-        tags: ["protagoniste", "enfer", "direction"],
-        description:
-          "Démone charismatique et redoutablement organisée. Elle voyage entre les mondes tout en dirigeant l’Enfer.",
-      },
-    ],
-    notes: [
-      {
-        id: "note-demo-tone",
-        title: "Ton général",
-        content:
-          "Comédie surnaturelle, aventure et contraste entre l’administration infernale et les voyages intermondes.",
-      },
-    ],
-    goals: [
-      {
-        id: "goal-demo-1",
-        title: "Définir l’ouverture du chapitre",
-        description: "Valider la scène d’introduction et son rythme.",
-        status: "doing",
-      },
-      {
-        id: "goal-demo-2",
-        title: "Finaliser la fiche de Lucy",
-        description: "Compléter ses objectifs et ses relations.",
-        status: "todo",
-      },
-    ],
-    customFonts: [],
-  };
+  const project = createBlankProject("Enfer Fatal", "manga");
+  project.id = "project-demo-enfer-fatal";
+  project.description = "Projet de démonstration. Explorez le Studio, puis créez votre propre projet depuis l’accueil.";
+  project.status = "draft";
+  project.targetPages = 24;
+  project.revision = 1;
+  project.savedRevision = 1;
+  project.volumes[0].id = "volume-demo-1";
+  project.volumes[0].chapters[0].id = "chapter-demo-1";
+  project.volumes[0].chapters[0].title = "Chapitre 1 — Une journée ordinaire en enfer";
+  project.volumes[0].chapters[0].pages = [
+    {
+      ...createEmptyPage(1), id: "page-demo-1",
+      content: "<h2>Ouverture</h2><p><strong>Plan général :</strong> les tours infernales dominent la ville sous un ciel rougeoyant.</p><p><em>Narration :</em> Même l’Enfer a besoin d’une bonne direction.</p>",
+    },
+    {
+      ...createEmptyPage(2), id: "page-demo-2", status: "done",
+      content: "<p>Lucy traverse les bureaux, un café à la main. Les employés s’écartent sur son passage.</p><p><strong>Lucy :</strong> Le rapport des âmes, sur mon bureau avant midi.</p>",
+    },
+  ];
+  project.characters = [{
+    ...createEmptyCharacter("Lucy"), id: "character-demo-lucy",
+    role: "Protagoniste — CEO des Enfers", species: "Démone",
+    tags: ["protagoniste", "enfer", "direction"],
+    description: "Démone charismatique et redoutablement organisée. Elle voyage entre les mondes tout en dirigeant l’Enfer.",
+  }];
+  project.notes = [{ id: "note-demo-tone", title: "Ton général", content: "Comédie surnaturelle, aventure et contraste entre l’administration infernale et les voyages intermondes." }];
+  project.goals = [
+    { id: "goal-demo-1", title: "Définir l’ouverture du chapitre", description: "Valider la scène d’introduction et son rythme.", status: "doing" },
+    { id: "goal-demo-2", title: "Finaliser la fiche de Lucy", description: "Compléter ses objectifs et ses relations.", status: "todo" },
+  ];
+  return project;
 }
 
 function normalizePage(value: Partial<StudioPage>, index: number): StudioPage {
   return {
+    ...createEmptyPage(index + 1),
     id: typeof value.id === "string" ? value.id : createId("page"),
     title: typeof value.title === "string" ? value.title : `Page ${index + 1}`,
-    content:
-      value.content === "<p>Commencez à écrire ici…</p>"
-        ? ""
-        : typeof value.content === "string"
-          ? value.content
-          : "",
-    status: ["draft", "review", "done"].includes(value.status ?? "")
-      ? (value.status as PageStatus)
-      : "draft",
-    typeOverride: ["manga", "novel", "script", "free"].includes(value.typeOverride ?? "")
-      ? (value.typeOverride as ProjectType)
-      : null,
-    formatOverride: ["free", "a4", "a5", "pocket", "novel", "large"].includes(
-      value.formatOverride ?? "",
-    )
-      ? (value.formatOverride as PageFormat)
-      : null,
+    content: value.content === "<p>Commencez à écrire ici…</p>" ? "" : typeof value.content === "string" ? value.content : "",
+    status: ["draft", "review", "done"].includes(value.status ?? "") ? value.status as PageStatus : "draft",
+    typeOverride: ["manga", "novel", "script", "free"].includes(value.typeOverride ?? "") ? value.typeOverride as ProjectType : null,
+    formatOverride: ["free", "a4", "a5", "pocket", "novel", "large"].includes(value.formatOverride ?? "") ? value.formatOverride as PageFormat : null,
+    backgroundOverride: normalizeColor(value.backgroundOverride, "") || null,
+    footerType: ["none", "page", "date", "custom"].includes(value.footerType ?? "") ? value.footerType as FooterType : "none",
+    footerText: typeof value.footerText === "string" ? value.footerText : "",
   };
 }
 
@@ -371,111 +396,68 @@ function normalizeCharacter(value: Partial<StudioCharacter>): StudioCharacter {
     objectives: typeof value.objectives === "string" ? value.objectives : "",
     notes: typeof value.notes === "string" ? value.notes : "",
     tags: Array.isArray(value.tags) ? value.tags.filter((tag): tag is string => typeof tag === "string") : [],
-    imageIds: Array.isArray(value.imageIds)
-      ? value.imageIds.filter((id): id is string => typeof id === "string")
-      : [],
-    outfits: Array.isArray(value.outfits)
-      ? value.outfits.map((outfit) => ({
-          id: typeof outfit.id === "string" ? outfit.id : createId("outfit"),
-          name: typeof outfit.name === "string" ? outfit.name : "Tenue",
-          description: typeof outfit.description === "string" ? outfit.description : "",
-          imageIds: Array.isArray(outfit.imageIds)
-            ? outfit.imageIds.filter((id): id is string => typeof id === "string")
-            : [],
-        }))
-      : [],
-    relations: Array.isArray(value.relations)
-      ? value.relations.map((relation) => ({
-          id: typeof relation.id === "string" ? relation.id : createId("relation"),
-          targetCharacterId:
-            typeof relation.targetCharacterId === "string" ? relation.targetCharacterId : "",
-          type: typeof relation.type === "string" ? relation.type : "Relation",
-          description: typeof relation.description === "string" ? relation.description : "",
-        }))
-      : [],
+    imageIds: Array.isArray(value.imageIds) ? value.imageIds.filter((id): id is string => typeof id === "string") : [],
+    outfits: Array.isArray(value.outfits) ? value.outfits.map((outfit) => ({
+      id: typeof outfit.id === "string" ? outfit.id : createId("outfit"),
+      name: typeof outfit.name === "string" ? outfit.name : "Tenue",
+      description: typeof outfit.description === "string" ? outfit.description : "",
+      imageIds: Array.isArray(outfit.imageIds) ? outfit.imageIds.filter((id): id is string => typeof id === "string") : [],
+    })) : [],
+    relations: Array.isArray(value.relations) ? value.relations.map((relation) => ({
+      id: typeof relation.id === "string" ? relation.id : createId("relation"),
+      targetCharacterId: typeof relation.targetCharacterId === "string" ? relation.targetCharacterId : "",
+      type: typeof relation.type === "string" ? relation.type : "Relation",
+      description: typeof relation.description === "string" ? relation.description : "",
+    })) : [],
   };
 }
 
 export function normalizeProject(value: unknown): StudioProject {
-  if (!value || typeof value !== "object") {
-    throw new Error("Le projet est invalide.");
-  }
-
+  if (!value || typeof value !== "object") throw new Error("Le projet est invalide.");
   const input = value as Partial<StudioProject>;
   if (typeof input.id !== "string" || typeof input.name !== "string") {
     throw new Error("Le fichier ne contient pas un projet Enfer Fatal Studio valide.");
   }
-
   const now = new Date().toISOString();
   const revision = Number.isFinite(input.revision) ? Number(input.revision) : 1;
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     id: input.id,
     name: input.name,
     description: typeof input.description === "string" ? input.description : "",
-    status: ["idea", "draft", "revision", "done"].includes(input.status ?? "")
-      ? (input.status as ProjectStatus)
-      : "draft",
-    projectType: ["manga", "novel", "script", "free"].includes(input.projectType ?? "")
-      ? (input.projectType as ProjectType)
-      : "manga",
-    defaultPageFormat: ["free", "a4", "a5", "pocket", "novel", "large"].includes(
-      input.defaultPageFormat ?? "",
-    )
-      ? (input.defaultPageFormat as PageFormat)
-      : "a4",
+    status: ["idea", "draft", "revision", "done"].includes(input.status ?? "") ? input.status as ProjectStatus : "draft",
+    projectType: ["manga", "novel", "script", "free"].includes(input.projectType ?? "") ? input.projectType as ProjectType : "manga",
+    defaultPageFormat: ["free", "a4", "a5", "pocket", "novel", "large"].includes(input.defaultPageFormat ?? "") ? input.defaultPageFormat as PageFormat : "a4",
     targetPages: Number.isFinite(input.targetPages) ? Math.max(0, Number(input.targetPages)) : 0,
     createdAt: typeof input.createdAt === "string" ? input.createdAt : now,
     updatedAt: typeof input.updatedAt === "string" ? input.updatedAt : now,
     revision,
     savedRevision: Number.isFinite(input.savedRevision) ? Number(input.savedRevision) : revision,
-    volumes: Array.isArray(input.volumes)
-      ? input.volumes.map((volume, volumeIndex) => ({
-          id: typeof volume.id === "string" ? volume.id : createId("volume"),
-          title: typeof volume.title === "string" ? volume.title : `Volume ${volumeIndex + 1}`,
-          chapters: Array.isArray(volume.chapters)
-            ? volume.chapters.map((chapter, chapterIndex) => ({
-                id: typeof chapter.id === "string" ? chapter.id : createId("chapter"),
-                title:
-                  typeof chapter.title === "string"
-                    ? chapter.title
-                    : `Chapitre ${chapterIndex + 1}`,
-                pages: Array.isArray(chapter.pages)
-                  ? chapter.pages.map((page, pageIndex) => normalizePage(page, pageIndex))
-                  : [],
-              }))
-            : [],
-        }))
-      : [],
-    characters: Array.isArray(input.characters)
-      ? input.characters.map((character) => normalizeCharacter(character))
-      : [],
-    notes: Array.isArray(input.notes)
-      ? input.notes.map((note) => ({
-          id: typeof note.id === "string" ? note.id : createId("note"),
-          title: typeof note.title === "string" ? note.title : "Note",
-          content: typeof note.content === "string" ? note.content : "",
-        }))
-      : [],
-    goals: Array.isArray(input.goals)
-      ? input.goals.map((goal) => ({
-          id: typeof goal.id === "string" ? goal.id : createId("goal"),
-          title: typeof goal.title === "string" ? goal.title : "Objectif",
-          description: typeof goal.description === "string" ? goal.description : "",
-          status: ["todo", "doing", "done"].includes(goal.status ?? "")
-            ? (goal.status as GoalStatus)
-            : "todo",
-        }))
-      : [],
-    customFonts: Array.isArray(input.customFonts)
-      ? input.customFonts.filter(
-          (font): font is StudioFont =>
-            typeof font.id === "string" &&
-            typeof font.name === "string" &&
-            typeof font.family === "string" &&
-            typeof font.mediaId === "string",
-        )
-      : [],
+    volumes: Array.isArray(input.volumes) ? input.volumes.map((volume, volumeIndex) => ({
+      id: typeof volume.id === "string" ? volume.id : createId("volume"),
+      title: typeof volume.title === "string" ? volume.title : `Volume ${volumeIndex + 1}`,
+      chapters: Array.isArray(volume.chapters) ? volume.chapters.map((chapter, chapterIndex) => ({
+        id: typeof chapter.id === "string" ? chapter.id : createId("chapter"),
+        title: typeof chapter.title === "string" ? chapter.title : `Chapitre ${chapterIndex + 1}`,
+        pages: Array.isArray(chapter.pages) ? chapter.pages.map((page, pageIndex) => normalizePage(page, pageIndex)) : [],
+      })) : [],
+    })) : [],
+    characters: Array.isArray(input.characters) ? input.characters.map(normalizeCharacter) : [],
+    notes: Array.isArray(input.notes) ? input.notes.map((note) => ({
+      id: typeof note.id === "string" ? note.id : createId("note"),
+      title: typeof note.title === "string" ? note.title : "Note",
+      content: typeof note.content === "string" ? note.content : "",
+    })) : [],
+    goals: Array.isArray(input.goals) ? input.goals.map((goal) => ({
+      id: typeof goal.id === "string" ? goal.id : createId("goal"),
+      title: typeof goal.title === "string" ? goal.title : "Objectif",
+      description: typeof goal.description === "string" ? goal.description : "",
+      status: ["todo", "doing", "done"].includes(goal.status ?? "") ? goal.status as GoalStatus : "todo",
+    })) : [],
+    customFonts: Array.isArray(input.customFonts) ? input.customFonts.flatMap((font) => {
+      if (typeof font?.id !== "string" || typeof font.name !== "string" || typeof font.family !== "string" || typeof font.mediaId !== "string") return [];
+      return [{ ...font, enabled: font.enabled !== false }];
+    }) : [],
   };
 }
 

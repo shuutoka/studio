@@ -16,6 +16,7 @@ import {
   CircleUserRound,
   Clock3,
   FileText,
+  FileDown,
   FolderOpen,
   Home,
   Import,
@@ -38,6 +39,7 @@ import { GlobalLibrary } from "@/components/studio/global-library";
 import { GoalsBoard } from "@/components/studio/goals-board";
 import { RichTextEditor } from "@/components/studio/rich-text-editor";
 import { useProjectFonts } from "@/components/studio/use-project-fonts";
+import { WritingWorkspace } from "@/components/studio/writing-workspace";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -95,6 +97,7 @@ import {
 import { downloadProject, readProjectFile } from "@/lib/project-file";
 import {
   createBlankProject,
+  createDefaultSettings,
   createDemoProject,
   createEmptyPage,
   createId,
@@ -109,13 +112,15 @@ import {
   type StudioMedia,
   type StudioPage,
   type StudioProject,
+  type StudioSettings,
   type StudioVolume,
 } from "@/lib/studio";
+import { exportProjectWriting, type WritingExportFormat } from "@/lib/writing-export";
 
-type Section = "dashboard" | "writing" | "characters" | "notes";
-type GlobalView = "home" | "library";
+export type Section = "dashboard" | "writing" | "characters" | "notes";
+type GlobalView = "home" | "library" | "media" | "settings";
 
-const sectionItems: Array<{ id: Section; label: string; icon: typeof LayoutDashboard }> = [
+export const sectionItems: Array<{ id: Section; label: string; icon: typeof LayoutDashboard }> = [
   { id: "dashboard", label: "Tableau de bord", icon: LayoutDashboard },
   { id: "writing", label: "Écriture", icon: BookOpen },
   { id: "characters", label: "Personnages", icon: Users },
@@ -630,11 +635,11 @@ function StudioTopbar({
   );
 }
 
-function LoadingView() {
+export function LoadingView() {
   return <div className="grid flex-1 place-items-center p-8"><div className="text-center"><div className="mx-auto mb-4 size-8 animate-spin rounded-full border-2 border-white/10 border-t-[#ef4f5f]" /><p className="text-sm text-[#8f8996]">Ouverture de votre espace…</p></div></div>;
 }
 
-function HomeView({
+export function HomeView({
   projects,
   onCreate,
   onImport,
@@ -723,7 +728,7 @@ function StatTile({ icon: Icon, label, value }: { icon: typeof FileText; label: 
   return <div className="rounded-2xl border border-white/7 bg-white/[.025] p-4 sm:p-5"><div className="mb-4 flex size-8 items-center justify-center rounded-lg bg-white/5 text-[#ef6977]"><Icon className="size-4" /></div><div className="text-2xl font-bold tracking-tight text-white">{value}</div><div className="mt-1 text-xs text-[#77717f]">{label}</div></div>;
 }
 
-function ProjectWorkspace({
+export function ProjectWorkspace({
   project,
   section,
   selectedPageId,
@@ -736,6 +741,10 @@ function ProjectWorkspace({
   uploadMedia,
   removeMedia,
   onDeleteProject,
+  settings,
+  updateSettings,
+  focusMode = false,
+  onToggleFocus = () => undefined,
 }: {
   project: StudioProject;
   section: Section;
@@ -749,8 +758,14 @@ function ProjectWorkspace({
   uploadMedia: (files: File[], kind: StudioMedia["kind"]) => Promise<string[]>;
   removeMedia: (mediaId: string) => Promise<void>;
   onDeleteProject: () => void;
+  settings?: StudioSettings;
+  updateSettings?: (mutate: (draft: StudioSettings) => void) => void;
+  focusMode?: boolean;
+  onToggleFocus?: () => void;
 }) {
-  if (section === "writing") return <WritingView project={project} selectedPageId={selectedPageId} onSelectPage={onSelectPage} updateProject={updateProject} uploadMedia={uploadMedia} />;
+  const effectiveSettings = settings ?? createDefaultSettings();
+  const effectiveUpdateSettings = updateSettings ?? (() => undefined);
+  if (section === "writing") return <WritingWorkspace project={project} selectedPageId={selectedPageId} onSelectPage={onSelectPage} updateProject={updateProject} settings={effectiveSettings} updateSettings={effectiveUpdateSettings} focusMode={focusMode} onToggleFocus={onToggleFocus} />;
   if (section === "characters") return <CharacterManager project={project} selectedCharacterId={selectedCharacterId} onSelectCharacter={onSelectCharacter} updateProject={updateProject} uploadMedia={uploadMedia} removeMedia={removeMedia} />;
   if (section === "notes") return <NotesView project={project} selectedNoteId={selectedNoteId} onSelectNote={onSelectNote} updateProject={updateProject} />;
   return <DashboardView project={project} updateProject={updateProject} onDeleteProject={onDeleteProject} />;
@@ -769,7 +784,7 @@ function DashboardView({
   return (
     <div className="studio-page flex-1 overflow-y-auto px-5 py-8 sm:px-8 lg:px-12 lg:py-10">
       <div className="mx-auto max-w-6xl">
-        <div className="mb-8"><div className="mb-2 text-xs font-semibold uppercase tracking-[.18em] text-[#ef6977]">Vue d’ensemble</div><h1 className="text-3xl font-bold tracking-[-.03em] text-white">{project.name}</h1><p className="mt-2 text-sm text-[#8f8996]">Dernière modification {formatDate(project.updatedAt)}</p></div>
+        <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><div className="mb-2 text-xs font-semibold uppercase tracking-[.18em] text-[#ef6977]">Vue d’ensemble</div><h1 className="text-3xl font-bold tracking-[-.03em] text-white">{project.name}</h1><p className="mt-2 text-sm text-[#8f8996]">Dernière modification {formatDate(project.updatedAt)}</p></div><WritingExportButton project={project} /></div>
         <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Metric label="Progression" value={`${stats.progress}%`} icon={BarChart3} />
           <Metric label="Pages" value={`${stats.completedPages} / ${project.targetPages || stats.pages}`} icon={FileText} />
@@ -809,6 +824,12 @@ function DashboardView({
   );
 }
 
+function WritingExportButton({ project }: { project: StudioProject }) {
+  const [open, setOpen] = useState(false);
+  const [format, setFormat] = useState<WritingExportFormat>("docx");
+  return <><Button variant="outline" className="border-white/10 bg-white/3" onClick={() => setOpen(true)}><FileDown /> Exporter l’écriture</Button><Dialog open={open} onOpenChange={setOpen}><DialogContent className="border-white/10 bg-[#17151d] text-[#eeeaf2]"><DialogHeader><DialogTitle>Exporter l’écriture</DialogTitle><DialogDescription className="text-[#9c96a5]">Crée un document contenant les volumes, chapitres et pages de « {project.name} ».</DialogDescription></DialogHeader><Field label="Format du document"><Select value={format} onValueChange={(value: WritingExportFormat) => setFormat(value)}><SelectTrigger className="w-full border-white/10 bg-white/4"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="docx">Word .docx</SelectItem><SelectItem value="doc">Word ancien .doc</SelectItem><SelectItem value="odt">OpenDocument .odt</SelectItem><SelectItem value="pdf">PDF .pdf</SelectItem><SelectItem value="html">Page web .html</SelectItem><SelectItem value="txt">Texte brut .txt</SelectItem></SelectContent></Select></Field><DialogFooter><Button variant="ghost" onClick={() => setOpen(false)}>Annuler</Button><Button className="bg-[#ef4f5f] text-white" onClick={() => { exportProjectWriting(project, format); setOpen(false); toast.success("Le document a été exporté."); }}><FileDown /> Exporter</Button></DialogFooter></DialogContent></Dialog></>;
+}
+
 function Metric({ label, value, icon: Icon }: { label: string; value: string; icon: typeof FileText }) {
   return <div className="rounded-2xl border border-white/8 bg-[#131218] p-5"><div className="flex items-start justify-between"><div><p className="text-xs text-[#77717f]">{label}</p><p className="mt-2 text-2xl font-bold text-white">{value}</p></div><span className="grid size-9 place-items-center rounded-xl bg-[#ef4f5f]/10 text-[#ef6977]"><Icon className="size-4" /></span></div></div>;
 }
@@ -817,6 +838,8 @@ function SmallCount({ label, value }: { label: string; value: number }) {
   return <div className="rounded-lg border border-white/6 bg-white/3 px-3 py-3"><div className="font-semibold text-white">{value}</div><div className="mt-0.5 text-[11px] text-[#77717f]">{label}</div></div>;
 }
 
+// Kept temporarily for compatibility with the former workspace component.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function WritingView({
   project,
   selectedPageId,
@@ -883,6 +906,7 @@ function WritingView({
         name: file.name.replace(/\.(ttf|otf|woff2?|eot)$/i, ""),
         family: `EFCustom-${ids[0].replace(/[^a-zA-Z0-9]/g, "")}`,
         mediaId: ids[0],
+        enabled: true,
       });
     });
     toast.success("Police ajoutée au projet.");

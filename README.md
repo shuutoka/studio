@@ -20,7 +20,15 @@ lisible `.efstudio.zip`.
 - copie de récupération automatique dans IndexedDB ;
 - état `Enregistré` / `Non enregistré` ;
 - avertissement du navigateur avant de quitter avec des changements non sauvegardés ;
-- sauvegarde ZIP avec `Ctrl+S` et import d’une archive existante ;
+- sauvegarde globale de tous les projets dans un fichier `.efs` non compressé ou `.zip` ;
+- écran d’ouverture proposant un fichier du PC, un espace vide ou la copie locale de secours ;
+- bouton et état de sauvegarde toujours visibles, avec raccourci configurable ;
+- paramètres inclus dans la sauvegarde : format, nom, thèmes, zoom, sons et raccourcis ;
+- gestion globale des polices intégrées et personnalisées ;
+- visionneuse filtrable de toutes les images, avec agrandissement ;
+- mode focus pour l’écriture, fonds personnalisables et pieds de page ;
+- caractères spéciaux, guillemets et raccourcis d’écriture personnalisables ;
+- export d’un manuscrit en DOC, DOCX, ODT, PDF, HTML ou TXT ;
 - fonctionnement hors ligne progressif grâce au service worker.
 
 La copie IndexedDB sert uniquement à récupérer le travail sur le même appareil.
@@ -59,13 +67,14 @@ racine (`utilisateur.github.io`).
 ## Contenu d’une sauvegarde
 
 ```text
-Mon-Projet.efstudio.zip
+enfer-fatal-studio.efs
 ├── manifest.json
-├── project.json
+├── studio.json
 └── media/
     ├── images et tenues
     └── polices personnalisées
 ```
 
-Le format porte un numéro de version afin de pouvoir ajouter des migrations lors
-des futures évolutions du Studio.
+Le fichier `.efs` est une archive ZIP non compressée portant une extension propre
+au Studio. Le format porte un numéro de version afin de permettre les migrations
+futures. Les anciennes archives `.efstudio.zip` restent importables.

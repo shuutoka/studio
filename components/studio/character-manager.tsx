@@ -198,7 +198,7 @@ export function CharacterManager({
             {selected && (
               <section className="min-w-0 rounded-2xl border border-white/8 bg-[#131218] p-5 sm:p-7">
                 <div className="mb-6 flex flex-col gap-4 border-b border-white/7 pb-6 sm:flex-row sm:items-center">
-                  <MediaPreview mediaId={selected.imageIds[0]} alt={selected.name} className="size-20 shrink-0 rounded-2xl" />
+                  <MediaPreview mediaId={selected.imageIds[0]} alt={selected.name} className="size-20 shrink-0 rounded-2xl" expandable />
                   <div className="min-w-0 flex-1">
                     <p className="text-xs uppercase tracking-[.15em] text-[#77717f]">Fiche personnage</p>
                     <h2 className="mt-1 truncate text-xl font-semibold text-white">{selected.name}</h2>
@@ -267,7 +267,7 @@ export function CharacterManager({
                       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                         {selected.imageIds.map((mediaId, index) => (
                           <div key={mediaId} className="group relative overflow-hidden rounded-xl border border-white/8">
-                            <MediaPreview mediaId={mediaId} alt={`${selected.name} ${index + 1}`} className="aspect-[3/4] w-full" />
+                            <MediaPreview mediaId={mediaId} alt={`${selected.name} ${index + 1}`} className="aspect-[3/4] w-full" expandable />
                             {index === 0 && <span className="absolute top-2 left-2 rounded-full bg-black/60 px-2 py-1 text-[9px] text-white">Portrait</span>}
                             <Button
                               aria-label="Supprimer l’image"
@@ -350,7 +350,7 @@ export function CharacterManager({
                             <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
                               {outfit.imageIds.map((mediaId) => (
                                 <div key={mediaId} className="group relative shrink-0">
-                                  <MediaPreview mediaId={mediaId} alt={outfit.name} className="h-28 w-20 rounded-lg" />
+                                  <MediaPreview mediaId={mediaId} alt={outfit.name} className="h-28 w-20 rounded-lg" expandable />
                                   <Button
                                     aria-label="Supprimer l’image de tenue"
                                     variant="destructive"

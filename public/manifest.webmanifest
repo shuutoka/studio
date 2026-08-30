@@ -14,5 +14,21 @@
       "type": "image/svg+xml",
       "purpose": "any"
     }
+  ],
+  "file_handlers": [
+    {
+      "action": "./",
+      "accept": {
+        "application/vnd.enfer-fatal-studio": [".efs"],
+        "application/zip": [".zip"]
+      },
+      "icons": [
+        {
+          "src": "./floppy-save.svg",
+          "sizes": "any",
+          "type": "image/svg+xml"
+        }
+      ]
+    }
   ]
 }
