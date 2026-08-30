@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  Bold, Heading2, Italic, List, ListOrdered, Minus, Palette, Redo2,
+  Bold, Heading2, Italic, List, ListOrdered, Minus, Redo2,
   Sigma, Underline, Undo2,
 } from "lucide-react";
 
+import { ColorPicker } from "@/components/studio/color-picker";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -46,6 +47,7 @@ const allowedElements = new Set([
 ]);
 
 const baseSpecialCharacters = ["—", "–", "…", "•", "©", "®", "™", "°", "±", "×", "÷", "œ", "Œ", "æ", "Æ"];
+const doublePressDelay = 450;
 
 function sanitizeHtml(html: string) {
   const parser = new DOMParser();
@@ -77,7 +79,8 @@ export function RichTextEditor({
 }: RichTextEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const loadedDocumentId = useRef<string | null>(null);
-  const lastSingleKey = useRef<{ shortcut: string; time: number } | null>(null);
+  const pendingDoublePress = useRef<{ shortcut: string; fallback: string; timer: number } | null>(null);
+  const nextFrenchQuoteIsOpening = useRef(true);
   const [fillRatio, setFillRatio] = useState(0);
   const formatDefinition = PAGE_FORMATS[format];
   const hasPageLimit = formatDefinition.height !== null;
@@ -98,11 +101,18 @@ export function RichTextEditor({
     if (editorRef.current && loadedDocumentId.current !== documentId) {
       editorRef.current.innerHTML = sanitizeHtml(html);
       loadedDocumentId.current = documentId;
+      nextFrenchQuoteIsOpening.current = true;
+      if (pendingDoublePress.current) window.clearTimeout(pendingDoublePress.current.timer);
+      pendingDoublePress.current = null;
       window.requestAnimationFrame(measureFill);
     }
   }, [documentId, html, measureFill]);
 
   useEffect(() => { window.requestAnimationFrame(measureFill); }, [format, footerType, measureFill]);
+  useEffect(() => { nextFrenchQuoteIsOpening.current = true; }, [quoteStyle]);
+  useEffect(() => () => {
+    if (pendingDoublePress.current) window.clearTimeout(pendingDoublePress.current.timer);
+  }, []);
 
   function emitChange() {
     if (!editorRef.current) return;
@@ -120,7 +130,19 @@ export function RichTextEditor({
     run("insertText", value);
   }
 
+  function flushPendingDoublePress() {
+    const pending = pendingDoublePress.current;
+    if (!pending) return;
+    window.clearTimeout(pending.timer);
+    pendingDoublePress.current = null;
+    if (pending.fallback) insertText(pending.fallback);
+  }
+
   function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    const binding = characterShortcuts.find((item) => item.shortcut && matchesShortcut(event, item.shortcut));
+    if (pendingDoublePress.current && pendingDoublePress.current.shortcut !== binding?.shortcut) {
+      flushPendingDoublePress();
+    }
     if (matchesShortcut(event, shortcuts.pageBreak)) {
       event.preventDefault();
       onPageBreak();
@@ -131,21 +153,38 @@ export function RichTextEditor({
       insertText("—");
       return;
     }
-    const binding = characterShortcuts.find((item) => item.shortcut && matchesShortcut(event, item.shortcut));
-    if (!binding) return;
-    if (binding.pressMode === "single" || !isSingleKeyShortcut(binding.shortcut)) {
+    if (binding && (binding.pressMode === "single" || !isSingleKeyShortcut(binding.shortcut))) {
       event.preventDefault();
       insertText(binding.character);
       return;
     }
-    const now = event.timeStamp;
-    if (lastSingleKey.current?.shortcut === binding.shortcut && now - lastSingleKey.current.time < 450) {
+    if (binding) {
       event.preventDefault();
-      document.execCommand("delete");
-      insertText(binding.character);
-      lastSingleKey.current = null;
-    } else {
-      lastSingleKey.current = { shortcut: binding.shortcut, time: now };
+      const pending = pendingDoublePress.current;
+      if (pending?.shortcut === binding.shortcut) {
+        window.clearTimeout(pending.timer);
+        pendingDoublePress.current = null;
+        insertText(binding.character);
+      } else {
+        const fallback = event.key.length === 1 ? event.key : event.key === "Spacebar" ? " " : "";
+        const timer = window.setTimeout(() => {
+          const current = pendingDoublePress.current;
+          if (current?.shortcut !== binding.shortcut) return;
+          pendingDoublePress.current = null;
+          if (current.fallback) insertText(current.fallback);
+        }, doublePressDelay);
+        pendingDoublePress.current = { shortcut: binding.shortcut, fallback, timer };
+      }
+      return;
+    }
+    if (event.key === "\"" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      event.preventDefault();
+      if (quoteStyle === "straight") {
+        insertText("\"");
+      } else {
+        insertText(nextFrenchQuoteIsOpening.current ? "« " : " »");
+        nextFrenchQuoteIsOpening.current = !nextFrenchQuoteIsOpening.current;
+      }
     }
   }
 
@@ -183,7 +222,7 @@ export function RichTextEditor({
         <ToolbarButton label="Liste à puces" onClick={() => run("insertUnorderedList")}><List /></ToolbarButton>
         <ToolbarButton label="Liste numérotée" onClick={() => run("insertOrderedList")}><ListOrdered /></ToolbarButton>
         <ToolbarButton label="Séparateur" onClick={() => run("insertHorizontalRule")}><Minus /></ToolbarButton>
-        <label className="relative inline-flex size-8 cursor-pointer items-center justify-center rounded-md text-[#aaa4b4] transition-colors hover:bg-white/7 hover:text-white" title="Couleur du texte"><Palette className="size-4" /><input aria-label="Couleur du texte" className="absolute inset-0 cursor-pointer opacity-0" type="color" defaultValue={textColor} onChange={(event) => run("foreColor", event.target.value)} /></label>
+        <ColorPicker label="Couleur du texte" value={textColor} onChange={(value) => run("foreColor", value)} />
         <DropdownMenu>
           <DropdownMenuTrigger asChild><Button aria-label="Caractères spéciaux" title="Caractères spéciaux" type="button" variant="ghost" size="icon-sm" className="text-[#aaa4b4]"><Sigma /></Button></DropdownMenuTrigger>
           <DropdownMenuContent className="grid grid-cols-4 gap-1 p-2">

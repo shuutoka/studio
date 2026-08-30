@@ -33,7 +33,7 @@ import {
 import { Toaster } from "@/components/ui/sonner";
 import { playInterfaceSound } from "@/lib/interface-sound";
 import { downloadStudioBackup, readStudioBackup } from "@/lib/project-file";
-import { matchesShortcut } from "@/lib/shortcuts";
+import { isShortcutRecorderTarget, matchesShortcut } from "@/lib/shortcuts";
 import {
   deleteMedia, deleteStoredProject, loadProjects, loadSettings, persistMedia,
   persistProjects, persistSettings, replaceLocalStudio,
@@ -172,6 +172,7 @@ export function StudioAppV3() {
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat || isShortcutRecorderTarget(event.target)) return;
       if (matchesShortcut(event, settings.shortcuts.save)) {
         event.preventDefault();
         void saveAll();

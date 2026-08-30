@@ -10,11 +10,20 @@ export function shortcutFromEvent(event: KeyboardEvent | React.KeyboardEvent) {
 }
 
 export function matchesShortcut(event: KeyboardEvent | React.KeyboardEvent, shortcut: string) {
-  return shortcutFromEvent(event).toLocaleLowerCase("fr") === shortcut.toLocaleLowerCase("fr");
+  return Boolean(shortcut.trim()) &&
+    shortcutFromEvent(event).toLocaleLowerCase("fr") === shortcut.toLocaleLowerCase("fr");
 }
 
 export function isSingleKeyShortcut(shortcut: string) {
   return !shortcut.includes("+");
+}
+
+export function isModifierKey(key: string) {
+  return ["Control", "Meta", "Alt", "Shift"].includes(normalizeKey(key));
+}
+
+export function isShortcutRecorderTarget(target: EventTarget | null) {
+  return target instanceof Element && Boolean(target.closest("[data-shortcut-recorder='true']"));
 }
 
 function normalizeKey(key: string) {

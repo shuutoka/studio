@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { ColorPicker } from "@/components/studio/color-picker";
 import { Input } from "@/components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -26,7 +27,7 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { createDefaultSettings, createId, STANDARD_FONTS, type StudioSettings } from "@/lib/studio";
-import { shortcutFromEvent } from "@/lib/shortcuts";
+import { isModifierKey, shortcutFromEvent } from "@/lib/shortcuts";
 
 type SettingsSection = "backup" | "fonts" | "appearance" | "writing";
 
@@ -43,6 +44,7 @@ export function SettingsView({
 }) {
   const [section, setSection] = useState<SettingsSection>("backup");
   const [allColor, setAllColor] = useState(settings.paperBackground);
+  const [zoomDraft, setZoomDraft] = useState<number | null>(null);
   const sections = [
     { id: "backup" as const, label: "Sauvegarde", icon: FileArchive },
     { id: "fonts" as const, label: "Polices d’écriture", icon: Type },
@@ -132,8 +134,22 @@ export function SettingsView({
                       ))}
                     </div>
                   </Field>
-                  <Field label={`Zoom de l’interface — ${settings.zoom} %`}>
-                    <div className="flex items-center gap-4"><Slider min={75} max={150} step={5} value={[settings.zoom]} onValueChange={([value]) => updateSettings((draft) => { draft.zoom = value; })} /><Button size="sm" variant="outline" className="border-white/10 bg-transparent" onClick={() => updateSettings((draft) => { draft.zoom = 100; })}>100 %</Button></div>
+                  <Field label={`Zoom de l’interface — ${zoomDraft ?? settings.zoom} %`}>
+                    <div className="flex items-center gap-4">
+                      <Slider
+                        min={75}
+                        max={150}
+                        step={5}
+                        value={[zoomDraft ?? settings.zoom]}
+                        onValueChange={(values) => { if (typeof values[0] === "number") setZoomDraft(values[0]); }}
+                        onValueCommit={(values) => {
+                          const value = values[0];
+                          if (typeof value === "number") updateSettings((draft) => { draft.zoom = value; });
+                          setZoomDraft(null);
+                        }}
+                      />
+                      <Button size="sm" variant="outline" className="border-white/10 bg-transparent" onClick={() => { setZoomDraft(null); updateSettings((draft) => { draft.zoom = 100; }); }}>100 %</Button>
+                    </div>
                   </Field>
                   <Field label="Son des boutons">
                     <Select value={settings.interfaceSound} onValueChange={(value: StudioSettings["interfaceSound"]) => updateSettings((draft) => { draft.interfaceSound = value; })}>
@@ -200,7 +216,29 @@ function Field({ label, children, className = "" }: { label: string; children: R
 }
 
 function ShortcutRecorder({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  return <Input readOnly value={value} placeholder="Cliquez puis pressez les touches" className="cursor-pointer border-white/10 bg-black/20 font-mono text-xs" onKeyDown={(event) => { event.preventDefault(); const shortcut = shortcutFromEvent(event); if (shortcut) onChange(shortcut); }} onFocus={(event) => event.currentTarget.select()} />;
+  return <Input
+    data-shortcut-recorder="true"
+    readOnly
+    value={value}
+    placeholder="Cliquez puis pressez les touches"
+    className="cursor-pointer border-white/10 bg-black/20 font-mono text-xs"
+    onKeyDown={(event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.nativeEvent.stopImmediatePropagation();
+      if (event.key === "Escape") {
+        event.currentTarget.blur();
+        return;
+      }
+      if (isModifierKey(event.key)) return;
+      const shortcut = shortcutFromEvent(event);
+      if (shortcut) {
+        onChange(shortcut);
+        event.currentTarget.blur();
+      }
+    }}
+    onFocus={(event) => event.currentTarget.select()}
+  />;
 }
 
 function FontRow({ name, family, badge, enabled, onToggle, onDelete }: { name: string; family: string; badge: string; enabled: boolean; onToggle: (checked: boolean) => void; onDelete?: () => void }) {
@@ -208,7 +246,7 @@ function FontRow({ name, family, badge, enabled, onToggle, onDelete }: { name: s
 }
 
 function ColorField({ label, value, onChange, compact = false }: { label: string; value: string; onChange: (value: string) => void; compact?: boolean }) {
-  return <label className={`grid gap-2 text-xs font-medium text-[#aaa4b4] ${compact ? "min-w-44" : ""}`}>{label}<span className="flex items-center gap-2 rounded-lg border border-white/9 bg-black/20 p-2"><input type="color" value={value} className="size-8 cursor-pointer rounded border-0 bg-transparent" onChange={(event) => onChange(event.target.value)} /><span className="font-mono text-xs text-[#c8c2cf]">{value.toUpperCase()}</span></span></label>;
+  return <div className={`grid gap-2 text-xs font-medium text-[#aaa4b4] ${compact ? "min-w-44" : ""}`}><span>{label}</span><span className="flex items-center gap-2 rounded-lg border border-white/9 bg-black/20 p-2"><ColorPicker label={label} value={value} onChange={onChange} /><span className="font-mono text-xs text-[#c8c2cf]">{value.toUpperCase()}</span></span></div>;
 }
 
 function InfoBox({ icon: Icon, children }: { icon: typeof Download; children: React.ReactNode }) {
