@@ -7,10 +7,16 @@ lisible `.efstudio.zip`.
 ## Fonctions disponibles
 
 - accueil multi-projets avec progression et statistiques ;
-- volumes, chapitres et pages ;
-- éditeur enrichi : titres, gras, italique, souligné, couleur et listes ;
-- fiches de personnages ;
+- types de projet : manga/BD, roman, script et écriture libre, avec surcharge par page ;
+- volumes, chapitres et pages vierges ;
+- simulation des formats A4, A5, poche, roman standard et grand format ;
+- éditeur enrichi : titres, polices, tailles, gras, italique, souligné, couleur et listes ;
+- ajout de polices personnalisées TTF, OTF, WOFF et WOFF2 ;
+- fiches de personnages avancées avec recherche, tags, images, tenues et relations ;
+- bibliothèque générale des personnages de tous les projets ;
+- objectifs en colonnes « À faire / En cours / Terminé » ;
 - carnet de notes ;
+- suppression confirmée des projets, personnages, pages, notes et objectifs ;
 - copie de récupération automatique dans IndexedDB ;
 - état `Enregistré` / `Non enregistré` ;
 - avertissement du navigateur avant de quitter avec des changements non sauvegardés ;
@@ -55,7 +61,10 @@ racine (`utilisateur.github.io`).
 ```text
 Mon-Projet.efstudio.zip
 ├── manifest.json
-└── project.json
+├── project.json
+└── media/
+    ├── images et tenues
+    └── polices personnalisées
 ```
 
 Le format porte un numéro de version afin de pouvoir ajouter des migrations lors
