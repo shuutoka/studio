@@ -8,8 +8,10 @@ import {
   FileArchive,
   Globe2,
   Keyboard,
+  Laptop,
   Palette,
   Plus,
+  Search,
   RotateCcw,
   Save,
   Trash2,
@@ -17,6 +19,7 @@ import {
   Upload,
   Volume2,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { ColorPicker } from "@/components/studio/color-picker";
@@ -48,6 +51,8 @@ export function SettingsView({
   const [section, setSection] = useState<SettingsSection>("backup");
   const [allColor, setAllColor] = useState(settings.paperBackground);
   const [zoomDraft, setZoomDraft] = useState<number | null>(null);
+  const [fontSearch, setFontSearch] = useState("");
+  const [scanningFonts, setScanningFonts] = useState(false);
   const zoomDraftRef = useRef(settings.zoom);
   const sections = [
     { id: "backup" as const, label: "Sauvegarde", icon: FileArchive },
@@ -55,6 +60,38 @@ export function SettingsView({
     { id: "appearance" as const, label: "Apparence et accessibilité", icon: Accessibility },
     { id: "writing" as const, label: "Écriture et raccourcis", icon: Keyboard },
   ];
+  const fontQuery = fontSearch.trim().toLocaleLowerCase("fr");
+  const matchesFont = (name: string, family: string) => !fontQuery || `${name} ${family}`.toLocaleLowerCase("fr").includes(fontQuery);
+
+  async function enableLocalFonts() {
+    const queryLocalFonts = (window as Window & {
+      queryLocalFonts?: () => Promise<Array<{ family: string; fullName?: string }>>;
+    }).queryLocalFonts;
+    if (!queryLocalFonts) {
+      toast.error("Ce navigateur ne permet pas de consulter les polices du PC. Utilisez une version récente de Chrome ou Edge.");
+      return;
+    }
+    setScanningFonts(true);
+    try {
+      const localFonts = await queryLocalFonts.call(window);
+      const families = [...new Set(localFonts.map((font) => font.family.trim()).filter(Boolean))]
+        .sort((left, right) => left.localeCompare(right, "fr"));
+      updateSettings((draft) => {
+        const previous = new Map(draft.systemFonts.map((font) => [font.family.toLocaleLowerCase("fr"), font]));
+        draft.systemFonts = families.map((family) => {
+          const existing = previous.get(family.toLocaleLowerCase("fr"));
+          return existing ?? { id: systemFontId(family), name: family, family, enabled: true };
+        });
+      });
+      toast.success(`${families.length} police${families.length > 1 ? "s" : ""} du PC disponible${families.length > 1 ? "s" : ""} dans l’éditeur.`);
+    } catch (error) {
+      toast.error(error instanceof DOMException && error.name === "NotAllowedError"
+        ? "L’autorisation d’accéder aux polices du PC a été refusée."
+        : "Les polices du PC n’ont pas pu être analysées.");
+    } finally {
+      setScanningFonts(false);
+    }
+  }
 
   return (
     <div className="studio-page flex-1 overflow-y-auto px-5 py-8 sm:px-8 lg:px-12 lg:py-10">
@@ -103,24 +140,34 @@ export function SettingsView({
             )}
 
             {section === "fonts" && (
-              <SettingsPanel icon={Type} title="Polices d’écriture" description="Activez les polices intégrées ou ajoutez vos propres fichiers de police.">
+              <SettingsPanel icon={Type} title="Polices d’écriture" description="Activez les polices intégrées, celles de votre ordinateur ou ajoutez vos propres fichiers.">
                 <div className="mb-6 flex flex-wrap gap-2">
                   <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md bg-[#ef4f5f] px-3 text-sm font-medium text-white hover:bg-[#ff6675]">
                     <Upload className="size-4" /> Ajouter une police
                     <input className="hidden" type="file" accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2" onChange={(event) => { const file = event.target.files?.[0]; if (file) void onUploadFont(file); event.target.value = ""; }} />
                   </label>
+                  <Button variant="outline" className="border-white/10 bg-transparent" disabled={scanningFonts} onClick={() => void enableLocalFonts()}>
+                    <Laptop /> {scanningFonts ? "Analyse en cours…" : "Activer les polices de ce PC"}
+                  </Button>
+                  {settings.systemFonts.length > 0 && <Button variant="ghost" onClick={() => updateSettings((draft) => { draft.systemFonts = []; })}><Trash2 /> Oublier les polices du PC</Button>}
                   <Button asChild variant="outline" className="border-white/10 bg-transparent">
                     <a href="https://fonts.google.com/" target="_blank" rel="noreferrer"><Globe2 /> Parcourir Google Fonts <ExternalLink className="size-3" /></a>
                   </Button>
                 </div>
+                <div className="relative mb-4"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#77717f]" /><Input aria-label="Rechercher une police" value={fontSearch} placeholder="Rechercher une police…" className="border-white/10 bg-black/20 pl-9" onChange={(event) => setFontSearch(event.target.value)} /></div>
+                <InfoBox icon={Laptop}>L’accès aux polices installées utilise une autorisation de Chrome ou Edge. Seul leur nom est enregistré ; les fichiers ne sont ni copiés ni envoyés.</InfoBox>
                 <div className="grid gap-2">
-                  {STANDARD_FONTS.map((font) => {
+                  {STANDARD_FONTS.filter((font) => matchesFont(font.label, font.family)).map((font) => {
                     const enabled = settings.enabledStandardFonts.includes(font.id);
-                    return <FontRow key={font.id} name={font.label} family={font.family} badge="Intégrée" enabled={enabled} onToggle={(checked) => updateSettings((draft) => { draft.enabledStandardFonts = checked ? [...new Set([...draft.enabledStandardFonts, font.id])] : draft.enabledStandardFonts.filter((id) => id !== font.id); })} />;
+                    return <FontRow key={font.id} name={font.label} family={font.family} badge="Par défaut" enabled={enabled} onToggle={(checked) => updateSettings((draft) => { draft.enabledStandardFonts = checked ? [...new Set([...draft.enabledStandardFonts, font.id])] : draft.enabledStandardFonts.filter((id) => id !== font.id); })} />;
                   })}
-                  {settings.customFonts.map((font) => (
+                  {settings.systemFonts.filter((font) => matchesFont(font.name, font.family)).map((font) => (
+                    <FontRow key={font.id} name={font.name} family={font.family} badge="PC" enabled={font.enabled} onToggle={(checked) => updateSettings((draft) => { const target = draft.systemFonts.find((item) => item.id === font.id); if (target) target.enabled = checked; })} />
+                  ))}
+                  {settings.customFonts.filter((font) => matchesFont(font.name, font.family)).map((font) => (
                     <FontRow key={font.id} name={font.name} family={font.family} badge="Ajoutée" enabled={font.enabled} onToggle={(checked) => updateSettings((draft) => { const target = draft.customFonts.find((item) => item.id === font.id); if (target) target.enabled = checked; })} onDelete={() => void onRemoveFont(font.id)} />
                   ))}
+                  {![...STANDARD_FONTS, ...settings.systemFonts, ...settings.customFonts].some((font) => matchesFont("label" in font ? font.label : font.name, font.family)) && <p className="rounded-xl border border-dashed border-white/10 p-5 text-center text-xs text-[#77717f]">Aucune police ne correspond à cette recherche.</p>}
                 </div>
               </SettingsPanel>
             )}
@@ -224,6 +271,12 @@ export function SettingsView({
       </div>
     </div>
   );
+}
+
+function systemFontId(family: string) {
+  let hash = 0;
+  for (const character of family.toLocaleLowerCase("fr")) hash = ((hash << 5) - hash + character.charCodeAt(0)) | 0;
+  return `system-${Math.abs(hash).toString(36)}`;
 }
 
 function SettingsPanel({ icon: Icon, title, description, children }: { icon: typeof Save; title: string; description: string; children: React.ReactNode }) {

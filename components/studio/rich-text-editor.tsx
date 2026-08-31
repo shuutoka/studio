@@ -19,7 +19,8 @@ import { isSingleKeyShortcut, matchesShortcut } from "@/lib/shortcuts";
 import {
   PAGE_FORMATS, PROJECT_TYPE_LABELS, STANDARD_FONTS, type CharacterShortcut,
   type FooterType, type PageFormat, type PageStatus, type ProjectType,
-  type QuoteStyle, type StudioFont, type StudioShortcuts, type WritingColorMode,
+  type QuoteStyle, type StudioFont, type StudioShortcuts, type StudioSystemFont,
+  type WritingColorMode,
 } from "@/lib/studio";
 
 export type RichTextEditorPage = {
@@ -48,6 +49,7 @@ type RichTextEditorProps = {
   defaultFormat: PageFormat;
   defaultProjectType: ProjectType;
   customFonts: StudioFont[];
+  systemFonts?: StudioSystemFont[];
   enabledStandardFonts?: string[];
   quoteStyle?: QuoteStyle;
   shortcuts?: StudioShortcuts;
@@ -59,6 +61,7 @@ type RichTextEditorProps = {
   onChange: (pageId: string, html: string) => void;
   onPageBreak: (pageId: string) => void;
   onOverflow: (pageId: string, html: string) => void;
+  onPullBackward: (previousPageId: string, currentPageId: string, previousHtml: string, currentHtml: string) => void;
   onFormatChange: (pageId: string, format: PageFormat | null) => void;
   onTypeChange: (pageId: string, type: ProjectType | null) => void;
   onStatusChange: (pageId: string, status: PageStatus) => void;
@@ -89,6 +92,7 @@ const specialCharacterGroups = {
 
 const specialGroupNames = Object.keys(specialCharacterGroups) as Array<keyof typeof specialCharacterGroups>;
 const doublePressDelay = 450;
+const fontSizeOptions = [6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32, 36, 48, 60, 72, 96];
 
 function sanitizeHtml(html: string) {
   const parser = new DOMParser();
@@ -120,12 +124,12 @@ function sanitizeHtml(html: string) {
 }
 
 export function RichTextEditor({
-  pages, selectedPageId, defaultFormat, customFonts,
+  pages, selectedPageId, defaultFormat, customFonts, systemFonts = [],
   defaultProjectType,
   enabledStandardFonts = STANDARD_FONTS.map((font) => font.id), quoteStyle = "french",
   shortcuts = { save: "Ctrl+S", focus: "Ctrl+Shift+F", pageBreak: "Ctrl+Enter", emDash: "Ctrl+-" },
   characterShortcuts = [], footerType, footerText, navigationTarget,
-  onSelectPage, onChange, onPageBreak, onOverflow, onFormatChange, onTypeChange,
+  onSelectPage, onChange, onPageBreak, onOverflow, onPullBackward, onFormatChange, onTypeChange,
   onStatusChange,
   onBackgroundChange, onColorModeChange, onFooterChange, onToggleIgnoreFooter,
   onDeletePage, onError = () => undefined,
@@ -135,12 +139,17 @@ export function RichTextEditor({
   const savedRangeRef = useRef<Range | null>(null);
   const activePageIdRef = useRef<string | null>(selectedPageId ?? pages[0]?.id ?? null);
   const pendingDoublePress = useRef<{ shortcut: string; fallback: string; timer: number } | null>(null);
+  const pendingFontSizeRef = useRef(new Map<string, number>());
   const nextFrenchQuoteIsOpening = useRef(true);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const pageStackRef = useRef<HTMLDivElement>(null);
+  const [selectedFontSize, setSelectedFontSize] = useState("12");
+  const [customFontSize, setCustomFontSize] = useState("12");
 
   const activePage = pages.find((page) => page.id === selectedPageId) ?? pages[0];
   const fonts = [
     ...STANDARD_FONTS.filter((font) => enabledStandardFonts.includes(font.id)),
+    ...systemFonts.filter((font) => font.enabled).map((font) => ({ id: font.id, label: font.name, family: font.family })),
     ...customFonts.filter((font) => font.enabled).map((font) => ({ id: font.id, label: font.name, family: font.family })),
   ];
 
@@ -180,6 +189,22 @@ export function RichTextEditor({
   useEffect(() => () => {
     if (pendingDoublePress.current) window.clearTimeout(pendingDoublePress.current.timer);
   }, []);
+  useEffect(() => {
+    const stack = pageStackRef.current;
+    if (!stack) return;
+    const forwardWheel = (event: WheelEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest("[data-writing-page]") || !event.deltaY) return;
+      event.preventDefault();
+      const multiplier = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? 24
+        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+          ? stack.clientHeight
+          : 1;
+      stack.scrollTop += event.deltaY * multiplier;
+    };
+    stack.addEventListener("wheel", forwardWheel, { passive: false });
+    return () => stack.removeEventListener("wheel", forwardWheel);
+  }, []);
 
   function rememberSelection(pageId: string) {
     activePageIdRef.current = pageId;
@@ -208,6 +233,18 @@ export function RichTextEditor({
     const editor = editorsRef.current.get(pageId);
     const page = pages.find((candidate) => candidate.id === pageId);
     if (!editor || !page) return;
+    const pendingFontSize = pendingFontSizeRef.current.get(pageId);
+    if (pendingFontSize) {
+      const selection = window.getSelection();
+      const font = selection?.anchorNode instanceof Element
+        ? selection.anchorNode.closest('font[size="7"]')
+        : selection?.anchorNode?.parentElement?.closest('font[size="7"]');
+      if (font && editor.contains(font)) {
+        (font as HTMLElement).style.fontSize = `${pendingFontSize}pt`;
+        font.removeAttribute("size");
+        pendingFontSizeRef.current.delete(pageId);
+      }
+    }
     const overflow = PAGE_FORMATS[page.format].height === null ? "" : extractOverflowHtml(editor);
     const nextHtml = sanitizeHtml(editor.innerHTML);
     loadedHtmlRef.current.set(pageId, nextHtml);
@@ -227,6 +264,74 @@ export function RichTextEditor({
     run("insertText", value);
   }
 
+  function applyBlockStyle(value: string) {
+    const active = restoreSelection();
+    if (!active) return;
+    document.execCommand("formatBlock", false, value === "chapter" ? "h2" : value);
+    if (value === "chapter") document.execCommand("justifyCenter", false);
+    rememberSelection(active.pageId);
+    emitChange(active.pageId);
+  }
+
+  function applyFontSize(value: number) {
+    const size = Math.min(144, Math.max(6, Math.round(value * 10) / 10));
+    const active = restoreSelection();
+    if (!active) return;
+    document.execCommand("fontSize", false, "7");
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    const candidates = [...active.editor.querySelectorAll('font[size="7"]')];
+    const selectedCandidates = range
+      ? candidates.filter((font) => range.intersectsNode(font))
+      : [];
+    const anchorFont = selection?.anchorNode instanceof Element
+      ? selection.anchorNode.closest('font[size="7"]')
+      : selection?.anchorNode?.parentElement?.closest('font[size="7"]');
+    const targets = selectedCandidates.length ? selectedCandidates : anchorFont ? [anchorFont] : [];
+    targets.forEach((font) => {
+      (font as HTMLElement).style.fontSize = `${size}pt`;
+      font.removeAttribute("size");
+    });
+    if (selection?.isCollapsed && !targets.length) pendingFontSizeRef.current.set(active.pageId, size);
+    else pendingFontSizeRef.current.delete(active.pageId);
+    setSelectedFontSize(String(size));
+    setCustomFontSize(String(size));
+    rememberSelection(active.pageId);
+    emitChange(active.pageId);
+  }
+
+  function commitCustomFontSize() {
+    const value = Number.parseFloat(customFontSize.replace(",", "."));
+    if (Number.isFinite(value)) applyFontSize(value);
+    else setCustomFontSize(selectedFontSize);
+  }
+
+  function pullPageBackward(pageId: string) {
+    const index = pages.findIndex((page) => page.id === pageId);
+    if (index <= 0) return;
+    const currentPage = pages[index];
+    const previousPage = pages[index - 1];
+    const currentEditor = editorsRef.current.get(currentPage.id);
+    const previousEditor = editorsRef.current.get(previousPage.id);
+    if (!currentEditor || !previousEditor) return;
+
+    mergeEditorBoundary(previousEditor, currentEditor);
+    const overflow = PAGE_FORMATS[previousPage.format].height === null
+      ? ""
+      : extractOverflowHtml(previousEditor);
+    currentEditor.innerHTML = overflow;
+
+    const previousHtml = sanitizeHtml(previousEditor.innerHTML);
+    const currentHtml = sanitizeHtml(currentEditor.innerHTML);
+    loadedHtmlRef.current.set(previousPage.id, previousHtml);
+    loadedHtmlRef.current.set(currentPage.id, currentHtml);
+    activePageIdRef.current = previousPage.id;
+    savedRangeRef.current = null;
+    onPullBackward(previousPage.id, currentPage.id, previousHtml, currentHtml);
+    onSelectPage(previousPage.id);
+    placeCaretAtEnd(previousEditor);
+  }
+
   function flushPendingDoublePress() {
     const pending = pendingDoublePress.current;
     if (!pending) return;
@@ -237,6 +342,15 @@ export function RichTextEditor({
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>, pageId: string) {
     activePageIdRef.current = pageId;
+    if (
+      (event.key === "Backspace" || event.key === "Delete") &&
+      !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey &&
+      isCaretAtEditorStart(event.currentTarget) && pages.findIndex((page) => page.id === pageId) > 0
+    ) {
+      event.preventDefault();
+      pullPageBackward(pageId);
+      return;
+    }
     const binding = characterShortcuts.find((item) => item.shortcut && matchesShortcut(event, item.shortcut));
     if (pendingDoublePress.current && pendingDoublePress.current.shortcut !== binding?.shortcut) flushPendingDoublePress();
     if (matchesShortcut(event, shortcuts.pageBreak)) {
@@ -306,18 +420,19 @@ export function RichTextEditor({
     <div className="writing-editor-shell flex min-h-0 flex-1 flex-col overflow-hidden border-y border-white/8 bg-[#111016]">
       <div className="writing-toolbar shrink-0 border-b border-white/8 bg-[#17151d] shadow-sm">
         <div className="flex items-center gap-1 overflow-x-auto px-3 py-2">
-          <Select defaultValue="p" onValueChange={(value) => run("formatBlock", value)}>
+          <Select defaultValue="p" onValueChange={applyBlockStyle}>
             <SelectTrigger aria-label="Style du texte" className="w-[150px] shrink-0 border-white/10 bg-white/4" size="sm"><SelectValue /></SelectTrigger>
-            <SelectContent><SelectItem value="p">Corps de texte</SelectItem><SelectItem value="h1">Titre</SelectItem><SelectItem value="h2">Sous-titre</SelectItem><SelectItem value="h3">Titre de section</SelectItem><SelectItem value="h4">Sous-section</SelectItem><SelectItem value="blockquote">Citation</SelectItem><SelectItem value="pre">Texte préformaté</SelectItem></SelectContent>
+            <SelectContent><SelectItem value="p">Corps de texte</SelectItem><SelectItem value="h1">Titre H1</SelectItem><SelectItem value="h2">Titre H2</SelectItem><SelectItem value="h3">Titre H3</SelectItem><SelectItem value="chapter">Chapitre — H2 centré</SelectItem><SelectItem value="blockquote">Citation</SelectItem><SelectItem value="pre">Texte préformaté</SelectItem></SelectContent>
           </Select>
           <Select defaultValue={fonts[0]?.family ?? "__none__"} onValueChange={(value) => { if (value !== "__none__") run("fontName", value); }}>
             <SelectTrigger aria-label="Police" className="w-[150px] shrink-0 border-white/10 bg-white/4" size="sm"><SelectValue /></SelectTrigger>
             <SelectContent>{fonts.length ? fonts.map((font) => <SelectItem key={font.id} value={font.family}>{font.label}</SelectItem>) : <SelectItem value="__none__">Aucune police</SelectItem>}</SelectContent>
           </Select>
-          <Select defaultValue="3" onValueChange={(value) => run("fontSize", value)}>
-            <SelectTrigger aria-label="Taille du texte" className="w-[78px] shrink-0 border-white/10 bg-white/4" size="sm"><SelectValue /></SelectTrigger>
-            <SelectContent><SelectItem value="1">9 pt</SelectItem><SelectItem value="2">10 pt</SelectItem><SelectItem value="3">12 pt</SelectItem><SelectItem value="4">14 pt</SelectItem><SelectItem value="5">18 pt</SelectItem><SelectItem value="6">24 pt</SelectItem><SelectItem value="7">32 pt</SelectItem></SelectContent>
+          <Select value={selectedFontSize} onValueChange={(value) => applyFontSize(Number(value))}>
+            <SelectTrigger aria-label="Taille du texte" className="w-[86px] shrink-0 border-white/10 bg-white/4" size="sm"><SelectValue /></SelectTrigger>
+            <SelectContent>{!fontSizeOptions.includes(Number(selectedFontSize)) && <SelectItem value={selectedFontSize}>{selectedFontSize} pt</SelectItem>}{fontSizeOptions.map((size) => <SelectItem key={size} value={String(size)}>{size} pt</SelectItem>)}</SelectContent>
           </Select>
+          <label className="relative shrink-0"><span className="sr-only">Taille personnalisée en points</span><Input aria-label="Taille personnalisée en points" type="number" min={6} max={144} step={0.5} value={customFontSize} className="h-8 w-[78px] border-white/10 bg-white/4 pr-6 text-xs" onChange={(event) => setCustomFontSize(event.target.value)} onBlur={commitCustomFontSize} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); commitCustomFontSize(); event.currentTarget.blur(); } }} /><span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-[#77717f]">pt</span></label>
 
           <ToolbarDivider />
           <ToolbarButton label="Gras" onClick={() => run("bold")}><Bold /></ToolbarButton>
@@ -372,7 +487,7 @@ export function RichTextEditor({
         </div>}
       </div>
 
-      <div className="writing-page-stack min-h-0 flex-1 overflow-y-auto bg-[#09080b] px-4 py-8 sm:px-8">
+      <div ref={pageStackRef} className="writing-page-stack min-h-0 flex-1 overflow-y-auto bg-[#09080b] px-4 py-8 sm:px-8">
         {pages.map((page) => {
           const format = PAGE_FORMATS[page.format];
           const limited = format.height !== null;
@@ -451,6 +566,35 @@ function ToolbarButton({ label, onClick, children }: { label: string; onClick: (
 
 function ToolbarDivider() {
   return <span aria-hidden="true" className="mx-1 h-5 w-px shrink-0 bg-white/10" />;
+}
+
+function isCaretAtEditorStart(editor: HTMLDivElement) {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount || !selection.isCollapsed || !editor.contains(selection.anchorNode)) return false;
+  const caret = selection.getRangeAt(0);
+  const before = document.createRange();
+  before.selectNodeContents(editor);
+  try {
+    before.setEnd(caret.startContainer, caret.startOffset);
+  } catch {
+    return false;
+  }
+  const fragment = before.cloneContents();
+  return !(fragment.textContent ?? "").replace(/\u00a0/g, " ").trim() && !fragment.querySelector("img,hr");
+}
+
+function mergeEditorBoundary(previousEditor: HTMLDivElement, currentEditor: HTMLDivElement) {
+  const previousLast = previousEditor.lastElementChild;
+  const currentFirst = currentEditor.firstElementChild;
+  const mergeableBlocks = new Set(["P", "DIV", "BLOCKQUOTE", "PRE", "H1", "H2", "H3", "H4", "UL", "OL"]);
+  if (
+    previousLast && currentFirst && previousLast.tagName === currentFirst.tagName &&
+    mergeableBlocks.has(previousLast.tagName) && previousLast.getAttribute("style") === currentFirst.getAttribute("style")
+  ) {
+    while (currentFirst.firstChild) previousLast.append(currentFirst.firstChild);
+    currentFirst.remove();
+  }
+  while (currentEditor.firstChild) previousEditor.append(currentEditor.firstChild);
 }
 
 function extractOverflowHtml(editor: HTMLDivElement) {

@@ -188,6 +188,22 @@ export function WritingWorkspace({
     goToPage(nextPage.id);
   }
 
+  function pullPageBackward(previousPageId: string, currentPageId: string, previousHtml: string, currentHtml: string) {
+    const removeCurrentPage = !hasMeaningfulEditorHtml(currentHtml);
+    updateProject((draft) => {
+      const previous = findPage(draft, previousPageId);
+      const current = findPage(draft, currentPageId);
+      if (!previous || !current) return;
+      previous.page.content = previousHtml;
+      current.page.content = currentHtml;
+      if (removeCurrentPage) {
+        const chapter = current.volume.chapters.find((candidate) => candidate.id === current.chapterId);
+        if (chapter) chapter.pages = chapter.pages.filter((page) => page.id !== currentPageId);
+      }
+    });
+    onSelectPage(previousPageId);
+  }
+
   function confirmDeletePage() {
     if (!deletePageId || !activeVolume) return;
     const index = pages.findIndex((page) => page.id === deletePageId);
@@ -269,6 +285,7 @@ export function WritingWorkspace({
           defaultFormat={project.defaultPageFormat}
           defaultProjectType={project.projectType}
           customFonts={settings.customFonts.filter((font) => font.enabled)}
+          systemFonts={settings.systemFonts}
           enabledStandardFonts={settings.enabledStandardFonts}
           quoteStyle={settings.quoteStyle}
           shortcuts={settings.shortcuts}
@@ -280,6 +297,7 @@ export function WritingWorkspace({
           onChange={(pageId, content) => updateProject((draft) => { const target = findPage(draft, pageId); if (target) target.page.content = content; })}
           onPageBreak={(pageId) => { addPageAfter(pageId); }}
           onOverflow={moveOverflow}
+          onPullBackward={pullPageBackward}
           onFormatChange={(pageId, format) => updateProject((draft) => { const target = findPage(draft, pageId); if (target) target.page.formatOverride = format; })}
           onTypeChange={(pageId, type) => updateProject((draft) => { const target = findPage(draft, pageId); if (target) target.page.typeOverride = type; })}
           onStatusChange={(pageId, status) => updateProject((draft) => { const target = findPage(draft, pageId); if (target) target.page.status = status; })}
@@ -353,4 +371,8 @@ function colorModeFor(color: string): WritingColorMode {
   const green = Number.parseInt(hex.slice(2, 4), 16);
   const blue = Number.parseInt(hex.slice(4, 6), 16);
   return (red * 299 + green * 587 + blue * 114) / 1000 < 145 ? "dark" : "light";
+}
+
+function hasMeaningfulEditorHtml(html: string) {
+  return Boolean(stripHtml(html) || /<(?:img|hr)\b/i.test(html));
 }

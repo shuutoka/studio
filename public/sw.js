@@ -1,4 +1,4 @@
-const CACHE_NAME = "enfer-fatal-studio-v5-writing";
+const CACHE_NAME = "enfer-fatal-studio-v6-writing-flow";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => {

@@ -32,13 +32,32 @@ export const PAGE_FORMATS: Record<
 };
 
 export const STANDARD_FONTS = [
+  { id: "aptos", label: "Aptos", family: "Aptos" },
+  { id: "calibri", label: "Calibri", family: "Calibri" },
+  { id: "cambria", label: "Cambria", family: "Cambria" },
   { id: "arial", label: "Arial", family: "Arial" },
+  { id: "arial-narrow", label: "Arial Narrow", family: "Arial Narrow" },
   { id: "georgia", label: "Georgia", family: "Georgia" },
   { id: "times", label: "Times New Roman", family: "Times New Roman" },
+  { id: "garamond", label: "Garamond", family: "Garamond" },
+  { id: "book-antiqua", label: "Book Antiqua", family: "Book Antiqua" },
+  { id: "palatino", label: "Palatino Linotype", family: "Palatino Linotype" },
+  { id: "baskerville", label: "Baskerville", family: "Baskerville" },
+  { id: "century-schoolbook", label: "Century Schoolbook", family: "Century Schoolbook" },
   { id: "verdana", label: "Verdana", family: "Verdana" },
+  { id: "tahoma", label: "Tahoma", family: "Tahoma" },
   { id: "trebuchet", label: "Trebuchet MS", family: "Trebuchet MS" },
+  { id: "segoe", label: "Segoe UI", family: "Segoe UI" },
+  { id: "helvetica", label: "Helvetica", family: "Helvetica" },
+  { id: "candara", label: "Candara", family: "Candara" },
+  { id: "corbel", label: "Corbel", family: "Corbel" },
+  { id: "constantia", label: "Constantia", family: "Constantia" },
   { id: "courier", label: "Courier New", family: "Courier New" },
+  { id: "consolas", label: "Consolas", family: "Consolas" },
+  { id: "lucida-console", label: "Lucida Console", family: "Lucida Console" },
 ] as const;
+
+const LEGACY_STANDARD_FONT_IDS = new Set(["arial", "georgia", "times", "verdana", "trebuchet", "courier"]);
 
 export type StudioPage = {
   id: string;
@@ -99,6 +118,13 @@ export type StudioFont = {
   enabled: boolean;
 };
 
+export type StudioSystemFont = {
+  id: string;
+  name: string;
+  family: string;
+  enabled: boolean;
+};
+
 export type StudioMedia = {
   id: string;
   projectId: string;
@@ -124,7 +150,7 @@ export type StudioShortcuts = {
 };
 
 export type StudioSettings = {
-  schemaVersion: 3;
+  schemaVersion: 4;
   id: "studio-settings";
   revision: number;
   savedRevision: number;
@@ -134,6 +160,7 @@ export type StudioSettings = {
   zoom: number;
   interfaceSound: InterfaceSound;
   enabledStandardFonts: string[];
+  systemFonts: StudioSystemFont[];
   customFonts: StudioFont[];
   freeBackground: string;
   paperBackground: string;
@@ -193,7 +220,7 @@ export function createId(prefix: string) {
 
 export function createDefaultSettings(): StudioSettings {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     id: "studio-settings",
     revision: 1,
     savedRevision: 1,
@@ -203,6 +230,7 @@ export function createDefaultSettings(): StudioSettings {
     zoom: 100,
     interfaceSound: "none",
     enabledStandardFonts: STANDARD_FONTS.map((font) => font.id),
+    systemFonts: [],
     customFonts: [],
     freeBackground: "#15131a",
     paperBackground: "#ffffff",
@@ -232,6 +260,10 @@ export function normalizeSettings(value: unknown): StudioSettings {
   if (!value || typeof value !== "object") return defaults;
   const input = value as Partial<StudioSettings>;
   const validStandardIds = new Set<string>(STANDARD_FONTS.map((font) => font.id));
+  const settingsVersion = Number(input.schemaVersion ?? 0);
+  const enabledStandardFonts = Array.isArray(input.enabledStandardFonts)
+    ? input.enabledStandardFonts.filter((id): id is string => typeof id === "string" && validStandardIds.has(id))
+    : defaults.enabledStandardFonts;
   const revision = Number.isFinite(input.revision) ? Math.max(1, Number(input.revision)) : 1;
   const legacyPaperBackground = normalizeColor(input.paperBackground, defaults.paperBackground);
   const paperBackground = Number(input.schemaVersion ?? 0) < 2 && legacyPaperBackground.toLowerCase() === "#f7f4ed"
@@ -253,9 +285,10 @@ export function normalizeSettings(value: unknown): StudioSettings {
     interfaceSound: ["none", "soft", "mechanical", "digital"].includes(input.interfaceSound ?? "")
       ? input.interfaceSound as InterfaceSound
       : "none",
-    enabledStandardFonts: Array.isArray(input.enabledStandardFonts)
-      ? input.enabledStandardFonts.filter((id): id is string => typeof id === "string" && validStandardIds.has(id))
-      : defaults.enabledStandardFonts,
+    enabledStandardFonts: settingsVersion < 4
+      ? [...new Set([...enabledStandardFonts, ...STANDARD_FONTS.filter((font) => !LEGACY_STANDARD_FONT_IDS.has(font.id)).map((font) => font.id)])]
+      : enabledStandardFonts,
+    systemFonts: normalizeSystemFonts(input.systemFonts),
     customFonts: Array.isArray(input.customFonts)
       ? input.customFonts.flatMap((font) => {
           if (
@@ -305,6 +338,24 @@ export function normalizeSettings(value: unknown): StudioSettings {
         })
       : [],
   };
+}
+
+function normalizeSystemFonts(value: unknown): StudioSystemFont[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value.flatMap((font) => {
+    if (!font || typeof font !== "object") return [];
+    const input = font as Partial<StudioSystemFont>;
+    const family = typeof input.family === "string" ? input.family.trim() : "";
+    if (!family || family.length > 180 || seen.has(family.toLocaleLowerCase("fr"))) return [];
+    seen.add(family.toLocaleLowerCase("fr"));
+    return [{
+      id: typeof input.id === "string" && input.id ? input.id : `system-${family.toLocaleLowerCase("fr").replace(/[^a-z0-9]+/g, "-")}`,
+      name: typeof input.name === "string" && input.name.trim() ? input.name.trim() : family,
+      family,
+      enabled: input.enabled !== false,
+    }];
+  }).slice(0, 2_000);
 }
 
 function normalizeShortcut(value: unknown, fallback: string) {

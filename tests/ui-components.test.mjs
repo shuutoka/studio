@@ -106,6 +106,7 @@ test("migrates the former cream paper and page footer settings", async () => {
   legacySettings.schemaVersion = 1;
   legacySettings.zoom = 125;
   legacySettings.paperBackground = "#F7F4ED";
+  legacySettings.systemFonts = [{ id: "system-test", name: "Police locale", family: "Police locale", enabled: true }];
 
   const normalizedSettings = normalizeSettings(legacySettings);
   assert.equal(normalizedSettings.zoom, 125);
@@ -114,6 +115,8 @@ test("migrates the former cream paper and page footer settings", async () => {
   assert.equal(normalizedSettings.writingCounters.words, true);
   assert.equal(normalizedSettings.writingCounters.symbols, true);
   assert.equal(normalizedSettings.writingCounters.pages, false);
+  assert.equal(normalizedSettings.systemFonts[0].family, "Police locale");
+  assert.ok(normalizedSettings.enabledStandardFonts.length > 15);
 
   const legacyProject = createBlankProject("Ancien projet", "novel");
   legacyProject.schemaVersion = 3;
@@ -142,6 +145,7 @@ test("the writing toolbar exposes the complete document controls", async () => {
     onChange() {},
     onPageBreak() {},
     onOverflow() {},
+    onPullBackward() {},
     onFormatChange() {},
     onTypeChange() {},
     onStatusChange() {},
@@ -157,6 +161,7 @@ test("the writing toolbar exposes the complete document controls", async () => {
   assert.match(html, /aria-label="Ajouter une image"/);
   assert.match(html, /aria-label="Justifier"/);
   assert.match(html, /aria-label="Pied de page"/);
+  assert.match(html, /aria-label="Taille personnalisée en points"/);
   assert.doesNotMatch(html, /type="color"/);
 });
 
@@ -172,4 +177,16 @@ test("counts a complete writing volume", async () => {
   assert.equal(stats.paragraphs, 3);
   assert.equal(stats.words, 6);
   assert.ok(stats.symbols > stats.characters);
+});
+
+test("keeps the revised writing flow controls wired", async () => {
+  const editorSource = await readFile(path.join(root, "components/studio/rich-text-editor.tsx"), "utf8");
+  const settingsSource = await readFile(path.join(root, "components/studio/settings-view.tsx"), "utf8");
+
+  assert.match(editorSource, /Titre H1/);
+  assert.match(editorSource, /Chapitre — H2 centré/);
+  assert.match(editorSource, /onPullBackward/);
+  assert.match(editorSource, /passive: false/);
+  assert.match(settingsSource, /Activer les polices de ce PC/);
+  assert.match(settingsSource, /queryLocalFonts/);
 });
