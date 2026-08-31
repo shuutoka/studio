@@ -44,6 +44,8 @@ const counterLabels: Record<WritingCounterKey, string> = {
   symbols: "Symboles avec espaces",
 };
 
+const normalWorkspaceHeight = "calc(var(--studio-viewport-height, 100svh) - 4rem)";
+
 function firstPageId(project: StudioProject) {
   return project.volumes.flatMap(getVolumePages)[0]?.id ?? null;
 }
@@ -251,7 +253,10 @@ export function WritingWorkspace({
   const deleteVolume = project.volumes.find((volume) => volume.id === deleteVolumeId);
 
   return (
-    <div className={`writing-workspace flex min-h-0 flex-1 flex-col bg-[#0c0b0f] ${focusMode ? "fixed inset-0 z-50" : ""}`}>
+    <div
+      className={`writing-workspace flex min-h-0 flex-1 flex-col overflow-hidden bg-[#0c0b0f] ${focusMode ? "fixed inset-0 z-50" : ""}`}
+      style={focusMode ? undefined : { height: normalWorkspaceHeight, maxHeight: normalWorkspaceHeight }}
+    >
       <header className="shrink-0 border-b border-white/8 bg-[#121117]">
         <div className="flex min-h-12 items-center gap-3 px-4 py-2 sm:px-5">
           <div className="min-w-0"><p className="truncate text-sm font-semibold text-white">{activeVolume?.title ?? "Espace d’écriture"}</p><p className="text-[11px] text-[#6f6976]">{project.name}</p></div>

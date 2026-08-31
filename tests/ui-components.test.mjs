@@ -182,6 +182,7 @@ test("counts a complete writing volume", async () => {
 test("keeps the revised writing flow controls wired", async () => {
   const editorSource = await readFile(path.join(root, "components/studio/rich-text-editor.tsx"), "utf8");
   const settingsSource = await readFile(path.join(root, "components/studio/settings-view.tsx"), "utf8");
+  const workspaceSource = await readFile(path.join(root, "components/studio/writing-workspace.tsx"), "utf8");
 
   assert.match(editorSource, /Titre H1/);
   assert.match(editorSource, /Chapitre — H2 centré/);
@@ -189,4 +190,7 @@ test("keeps the revised writing flow controls wired", async () => {
   assert.match(editorSource, /passive: false/);
   assert.match(settingsSource, /Activer les polices de ce PC/);
   assert.match(settingsSource, /queryLocalFonts/);
+  assert.match(workspaceSource, /--studio-viewport-height/);
+  assert.match(workspaceSource, /maxHeight: normalWorkspaceHeight/);
+  assert.match(workspaceSource, /overflow-hidden/);
 });
