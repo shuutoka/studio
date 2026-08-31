@@ -16,7 +16,6 @@ import {
   CircleUserRound,
   Clock3,
   FileText,
-  FileDown,
   FolderOpen,
   Home,
   Import,
@@ -28,8 +27,6 @@ import {
   Settings2,
   Sparkles,
   Trash2,
-  Type,
-  Upload,
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -37,8 +34,8 @@ import { toast } from "sonner";
 import { CharacterManager } from "@/components/studio/character-manager";
 import { GlobalLibrary } from "@/components/studio/global-library";
 import { GoalsBoard } from "@/components/studio/goals-board";
-import { RichTextEditor } from "@/components/studio/rich-text-editor";
 import { useProjectFonts } from "@/components/studio/use-project-fonts";
+import { WritingExportButton } from "@/components/studio/writing-export-button";
 import { WritingWorkspace } from "@/components/studio/writing-workspace";
 import {
   AlertDialog,
@@ -99,26 +96,17 @@ import {
   createBlankProject,
   createDefaultSettings,
   createDemoProject,
-  createEmptyPage,
   createId,
   getProjectStats,
   PAGE_FORMATS,
   PROJECT_TYPE_LABELS,
-  stripHtml,
   type PageFormat,
   type ProjectType,
-  type StudioChapter,
   type StudioCharacter,
   type StudioMedia,
-  type StudioPage,
   type StudioProject,
   type StudioSettings,
-  type StudioVolume,
 } from "@/lib/studio";
-import {
-  exportProjectWriting, getManuscriptFilename, getManuscriptPageCount,
-  type WritingExportFormat,
-} from "@/lib/writing-export";
 
 export type Section = "dashboard" | "writing" | "characters" | "notes";
 type GlobalView = "home" | "library" | "media" | "settings";
@@ -137,24 +125,8 @@ const projectStatusLabels = {
   done: "Terminé",
 };
 
-const pageStatusLabels = {
-  draft: "Brouillon",
-  review: "À relire",
-  done: "Terminée",
-};
-
 function firstPageId(project: StudioProject) {
   return project.volumes[0]?.chapters[0]?.pages[0]?.id ?? null;
-}
-
-function findPage(project: StudioProject, pageId: string | null) {
-  for (const volume of project.volumes) {
-    for (const chapter of volume.chapters) {
-      const page = chapter.pages.find((candidate) => candidate.id === pageId);
-      if (page) return { volume, chapter, page };
-    }
-  }
-  return null;
 }
 
 function formatDate(value: string) {
@@ -798,7 +770,7 @@ function DashboardView({
         <div className="grid gap-5 lg:grid-cols-[1.25fr_.9fr]">
           <section className="rounded-2xl border border-white/8 bg-[#131218] p-5 sm:p-6">
             <h2 className="font-semibold text-white">Progression du manuscrit</h2><p className="mt-1 text-sm text-[#8f8996]">Calculée à partir des pages marquées comme terminées.</p>
-            <div className="mt-6 rounded-xl bg-black/20 p-5"><div className="mb-3 flex justify-between text-sm"><span className="text-[#aaa4b4]">Pages terminées</span><span className="font-semibold text-white">{stats.completedPages} sur {project.targetPages || stats.pages}</span></div><Progress value={stats.progress} className="h-2 bg-white/7 [&>div]:bg-[#ef4f5f]" /><div className="mt-5 grid grid-cols-3 gap-3 text-center"><SmallCount label="Volumes" value={stats.volumes} /><SmallCount label="Chapitres" value={stats.chapters} /><SmallCount label="Personnages" value={stats.characters} /></div></div>
+            <div className="mt-6 rounded-xl bg-black/20 p-5"><div className="mb-3 flex justify-between text-sm"><span className="text-[#aaa4b4]">Pages terminées</span><span className="font-semibold text-white">{stats.completedPages} sur {project.targetPages || stats.pages}</span></div><Progress value={stats.progress} className="h-2 bg-white/7 [&>div]:bg-[#ef4f5f]" /><div className="mt-5 grid grid-cols-3 gap-3 text-center"><SmallCount label="Volumes" value={stats.volumes} /><SmallCount label="Pages" value={stats.pages} /><SmallCount label="Personnages" value={stats.characters} /></div></div>
           </section>
 
           <section className="rounded-2xl border border-white/8 bg-[#131218] p-5 sm:p-6">
@@ -827,186 +799,12 @@ function DashboardView({
   );
 }
 
-function WritingExportButton({ project }: { project: StudioProject }) {
-  const [open, setOpen] = useState(false);
-  const [format, setFormat] = useState<WritingExportFormat>("docx");
-  const [volumeId, setVolumeId] = useState(project.volumes[0]?.id ?? "");
-  const selectedVolumeId = project.volumes.some((volume) => volume.id === volumeId)
-    ? volumeId
-    : project.volumes[0]?.id ?? "";
-  const manuscriptPageCount = selectedVolumeId ? getManuscriptPageCount(project, selectedVolumeId) : 0;
-
-  function startExport() {
-    if (!selectedVolumeId) return;
-    try {
-      const result = exportProjectWriting(project, selectedVolumeId, format);
-      setOpen(false);
-      toast.success(result === "print" ? "Le dialogue d’impression PDF a été ouvert." : "Le manuscrit a été exporté.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "L’export du manuscrit a échoué.");
-    }
-  }
-
-  return <>
-    <Button variant="outline" className="border-white/10 bg-white/3" onClick={() => { setVolumeId(project.volumes[0]?.id ?? ""); setOpen(true); }}><FileDown /> Exporter l’écriture</Button>
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="border-white/10 bg-[#17151d] text-[#eeeaf2]">
-        <DialogHeader>
-          <DialogTitle>Exporter un manuscrit</DialogTitle>
-          <DialogDescription className="text-[#9c96a5]">Choisissez le volume à exporter. Toutes ses pages seront conservées, y compris les pages vides et les sauts de page.</DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-4">
-          <Field label="Manuscrit à exporter">
-            <Select value={selectedVolumeId} onValueChange={setVolumeId} disabled={!project.volumes.length}>
-              <SelectTrigger className="w-full border-white/10 bg-white/4"><SelectValue placeholder="Aucun volume" /></SelectTrigger>
-              <SelectContent>{project.volumes.map((volume) => <SelectItem key={volume.id} value={volume.id}>{volume.title} — {getManuscriptPageCount(project, volume.id)} page(s)</SelectItem>)}</SelectContent>
-            </Select>
-          </Field>
-          <Field label="Format du document">
-            <Select value={format} onValueChange={(value: WritingExportFormat) => setFormat(value)}>
-              <SelectTrigger className="w-full border-white/10 bg-white/4"><SelectValue /></SelectTrigger>
-              <SelectContent><SelectItem value="docx">Word .docx</SelectItem><SelectItem value="doc">Word ancien .doc</SelectItem><SelectItem value="odt">OpenDocument .odt</SelectItem><SelectItem value="pdf">PDF .pdf — via impression</SelectItem><SelectItem value="html">Page web .html</SelectItem><SelectItem value="txt">Texte brut .txt</SelectItem></SelectContent>
-            </Select>
-          </Field>
-          {selectedVolumeId && <p className="rounded-lg border border-white/8 bg-black/15 px-3 py-2 text-xs text-[#8f8996]">Fichier : <span className="font-mono text-[#c8c2cf]">{getManuscriptFilename(project, selectedVolumeId)}.{format}</span> · {manuscriptPageCount} page{manuscriptPageCount > 1 ? "s" : ""}</p>}
-        </div>
-        <DialogFooter><Button variant="ghost" onClick={() => setOpen(false)}>Annuler</Button><Button className="bg-[#ef4f5f] text-white" disabled={!selectedVolumeId || manuscriptPageCount === 0} onClick={startExport}><FileDown /> Exporter</Button></DialogFooter>
-      </DialogContent>
-    </Dialog>
-  </>;
-}
-
 function Metric({ label, value, icon: Icon }: { label: string; value: string; icon: typeof FileText }) {
   return <div className="rounded-2xl border border-white/8 bg-[#131218] p-5"><div className="flex items-start justify-between"><div><p className="text-xs text-[#77717f]">{label}</p><p className="mt-2 text-2xl font-bold text-white">{value}</p></div><span className="grid size-9 place-items-center rounded-xl bg-[#ef4f5f]/10 text-[#ef6977]"><Icon className="size-4" /></span></div></div>;
 }
 
 function SmallCount({ label, value }: { label: string; value: number }) {
   return <div className="rounded-lg border border-white/6 bg-white/3 px-3 py-3"><div className="font-semibold text-white">{value}</div><div className="mt-0.5 text-[11px] text-[#77717f]">{label}</div></div>;
-}
-
-// Kept temporarily for compatibility with the former workspace component.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function WritingView({
-  project,
-  selectedPageId,
-  onSelectPage,
-  updateProject,
-  uploadMedia,
-}: {
-  project: StudioProject;
-  selectedPageId: string | null;
-  onSelectPage: (id: string) => void;
-  updateProject: (mutate: (draft: StudioProject) => void) => void;
-  uploadMedia: (files: File[], kind: StudioMedia["kind"]) => Promise<string[]>;
-}) {
-  const selection = findPage(project, selectedPageId) ?? findPage(project, firstPageId(project));
-  const [deletePageId, setDeletePageId] = useState<string | null>(null);
-
-  function addVolume() {
-    const page = createEmptyPage();
-    const chapter: StudioChapter = { id: createId("chapter"), title: "Chapitre 1", pages: [page] };
-    const volume: StudioVolume = { id: createId("volume"), title: `Volume ${project.volumes.length + 1}`, chapters: [chapter] };
-    updateProject((draft) => draft.volumes.push(volume));
-    onSelectPage(page.id);
-  }
-
-  function addChapter(volumeId: string) {
-    const volume = project.volumes.find((candidate) => candidate.id === volumeId);
-    const page = createEmptyPage();
-    const chapter: StudioChapter = { id: createId("chapter"), title: `Chapitre ${(volume?.chapters.length ?? 0) + 1}`, pages: [page] };
-    updateProject((draft) => { draft.volumes.find((candidate) => candidate.id === volumeId)?.chapters.push(chapter); });
-    onSelectPage(page.id);
-  }
-
-  function addPage(chapterId: string) {
-    let pageNumber = 1;
-    project.volumes.forEach((volume) => {
-      const chapter = volume.chapters.find((candidate) => candidate.id === chapterId);
-      if (chapter) pageNumber = chapter.pages.length + 1;
-    });
-    const page = createEmptyPage(pageNumber);
-    updateProject((draft) => { draft.volumes.forEach((volume) => { volume.chapters.find((candidate) => candidate.id === chapterId)?.pages.push(page); }); });
-    onSelectPage(page.id);
-  }
-
-  function confirmDeletePage() {
-    if (!deletePageId) return;
-    let nextPageId: string | null = null;
-    updateProject((draft) => {
-      const allPages = draft.volumes.flatMap((volume) => volume.chapters.flatMap((chapter) => chapter.pages));
-      const index = allPages.findIndex((page) => page.id === deletePageId);
-      nextPageId = allPages[index + 1]?.id ?? allPages[index - 1]?.id ?? null;
-      draft.volumes.forEach((volume) => volume.chapters.forEach((chapter) => { chapter.pages = chapter.pages.filter((page) => page.id !== deletePageId); }));
-    });
-    if (nextPageId) onSelectPage(nextPageId);
-    setDeletePageId(null);
-  }
-
-  async function uploadFont(file: File | undefined) {
-    if (!file) return;
-    const ids = await uploadMedia([file], "font");
-    if (!ids[0]) return;
-    updateProject((draft) => {
-      draft.customFonts.push({
-        id: createId("font"),
-        name: file.name.replace(/\.(ttf|otf|woff2?|eot)$/i, ""),
-        family: `EFCustom-${ids[0].replace(/[^a-zA-Z0-9]/g, "")}`,
-        mediaId: ids[0],
-        enabled: true,
-      });
-    });
-    toast.success("Police ajoutée au projet.");
-  }
-
-  const pageFormat = selection?.page.formatOverride ?? project.defaultPageFormat;
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-      <aside className="shrink-0 border-b border-white/7 bg-[#100f14] lg:w-72 lg:border-r lg:border-b-0">
-        <div className="flex items-center justify-between border-b border-white/7 px-4 py-3"><span className="text-xs font-semibold uppercase tracking-[.15em] text-[#8f8996]">Manuscrit</span><Button aria-label="Ajouter un volume" title="Ajouter un volume" size="icon-xs" variant="ghost" onClick={addVolume}><Plus /></Button></div>
-        <div className="max-h-64 overflow-y-auto p-2 lg:max-h-[calc(100svh-7.2rem)]">
-          {project.volumes.map((volume) => (
-            <div key={volume.id} className="mb-3">
-              <div className="flex items-center gap-1 px-2 py-1.5 text-xs font-semibold text-[#c8c2cf]"><BookOpen className="size-3.5 text-[#ef6977]" /><span className="truncate">{volume.title}</span><Button aria-label={`Ajouter un chapitre à ${volume.title}`} title="Ajouter un chapitre" variant="ghost" size="icon-xs" className="ml-auto text-[#77717f]" onClick={() => addChapter(volume.id)}><Plus /></Button></div>
-              {volume.chapters.map((chapter) => (
-                <div key={chapter.id} className="ml-3 border-l border-white/7 pl-2">
-                  <div className="flex items-center gap-1 px-2 py-1.5 text-xs text-[#8f8996]"><span className="truncate">{chapter.title}</span><Button aria-label={`Ajouter une page à ${chapter.title}`} title="Ajouter une page" variant="ghost" size="icon-xs" className="ml-auto text-[#77717f]" onClick={() => addPage(chapter.id)}><Plus /></Button></div>
-                  {chapter.pages.map((page) => (
-                    <button key={page.id} className={`mb-0.5 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition ${page.id === selection?.page.id ? "bg-[#ef4f5f]/12 text-[#ff8a95]" : "text-[#77717f] hover:bg-white/4 hover:text-[#c8c2cf]"}`} onClick={() => onSelectPage(page.id)}>{page.status === "done" ? <Check className="size-3.5 text-[#58c68a]" /> : <FileText className="size-3.5" />}<span className="truncate">{page.title}</span></button>
-                  ))}
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
-      </aside>
-
-      {selection ? (
-        <section className="flex min-h-0 min-w-0 flex-1 flex-col p-4 sm:p-6 lg:p-8">
-          <div className="mb-4 flex flex-col gap-3">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              <Input aria-label="Titre de la page" value={selection.page.title} className="h-auto flex-1 border-0 bg-transparent px-0 text-xl font-semibold text-white shadow-none focus-visible:ring-0" onChange={(event) => updateProject((draft) => { const target = findPage(draft, selection.page.id); if (target) target.page.title = event.target.value; })} />
-              <div className="flex items-center gap-2"><span className="text-xs text-[#77717f]">{stripHtml(selection.page.content).split(/\s+/).filter(Boolean).length} mots</span><Button aria-label="Supprimer la page" title="Supprimer la page" variant="ghost" size="icon-sm" className="text-[#77717f] hover:text-[#ff7885]" onClick={() => setDeletePageId(selection.page.id)}><Trash2 /></Button></div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-white/7 bg-white/2 p-2">
-              <Select value={selection.page.status} onValueChange={(status: StudioPage["status"]) => updateProject((draft) => { const target = findPage(draft, selection.page.id); if (target) target.page.status = status; })}><SelectTrigger size="sm" className="w-[130px] border-white/10 bg-white/3"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(pageStatusLabels).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select>
-              <Select value={selection.page.typeOverride ?? "inherit"} onValueChange={(value) => updateProject((draft) => { const target = findPage(draft, selection.page.id); if (target) target.page.typeOverride = value === "inherit" ? null : value as ProjectType; })}><SelectTrigger size="sm" className="w-[168px] border-white/10 bg-white/3"><Type className="size-4" /><SelectValue /></SelectTrigger><SelectContent><SelectItem value="inherit">Type : {PROJECT_TYPE_LABELS[project.projectType]}</SelectItem>{Object.entries(PROJECT_TYPE_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select>
-              <Select value={selection.page.formatOverride ?? "inherit"} onValueChange={(value) => updateProject((draft) => { const target = findPage(draft, selection.page.id); if (target) target.page.formatOverride = value === "inherit" ? null : value as PageFormat; })}><SelectTrigger size="sm" className="w-[180px] border-white/10 bg-white/3"><FileText className="size-4" /><SelectValue /></SelectTrigger><SelectContent><SelectItem value="inherit">Format : {PAGE_FORMATS[project.defaultPageFormat].label}</SelectItem>{Object.entries(PAGE_FORMATS).map(([value, format]) => <SelectItem key={value} value={value}>{format.label} — {format.detail}</SelectItem>)}</SelectContent></Select>
-              <label className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-md border border-white/10 bg-white/3 px-3 text-xs font-medium text-[#c8c2cf] hover:bg-white/6"><Upload className="size-3.5" /> Ajouter une police<input className="hidden" type="file" accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2" onChange={(event) => { void uploadFont(event.target.files?.[0]); event.target.value = ""; }} /></label>
-              {project.customFonts.length > 0 && <span className="text-[11px] text-[#77717f]">{project.customFonts.length} police{project.customFonts.length > 1 ? "s" : ""} ajoutée{project.customFonts.length > 1 ? "s" : ""}</span>}
-            </div>
-          </div>
-          <RichTextEditor documentId={selection.page.id} html={selection.page.content} format={pageFormat} customFonts={project.customFonts} onChange={(content) => updateProject((draft) => { const target = findPage(draft, selection.page.id); if (target) target.page.content = content; })} />
-        </section>
-      ) : (
-        <div className="grid flex-1 place-items-center p-8 text-center text-[#8f8996]"><div><BookOpen className="mx-auto mb-3 size-7" /><p>Ajoutez un volume pour commencer à écrire.</p></div></div>
-      )}
-
-      <AlertDialog open={Boolean(deletePageId)} onOpenChange={(open) => !open && setDeletePageId(null)}>
-        <AlertDialogContent className="border-white/10 bg-[#17151d] text-[#eeeaf2]"><AlertDialogHeader><AlertDialogTitle>Supprimer cette page ?</AlertDialogTitle><AlertDialogDescription className="text-[#9c96a5]">Son texte sera supprimé de la copie locale du projet.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel className="border-white/10 bg-transparent">Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={confirmDeletePage}>Supprimer</AlertDialogAction></AlertDialogFooter></AlertDialogContent>
-      </AlertDialog>
-    </div>
-  );
 }
 
 function NotesView({

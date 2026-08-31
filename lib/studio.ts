@@ -10,6 +10,7 @@ export type WritingColorMode = "light" | "dark";
 export type QuoteStyle = "straight" | "french";
 export type FooterType = "none" | "page" | "date" | "custom";
 export type ShortcutPressMode = "single" | "double";
+export type WritingCounterKey = "words" | "paragraphs" | "pages" | "characters" | "symbols";
 
 export const PROJECT_TYPE_LABELS: Record<ProjectType, string> = {
   manga: "Manga / BD",
@@ -123,7 +124,7 @@ export type StudioShortcuts = {
 };
 
 export type StudioSettings = {
-  schemaVersion: 2;
+  schemaVersion: 3;
   id: "studio-settings";
   revision: number;
   savedRevision: number;
@@ -140,6 +141,7 @@ export type StudioSettings = {
   paperColorMode: WritingColorMode;
   customColors: string[];
   quoteStyle: QuoteStyle;
+  writingCounters: Record<WritingCounterKey, boolean>;
   shortcuts: StudioShortcuts;
   characterShortcuts: CharacterShortcut[];
 };
@@ -167,6 +169,8 @@ export type StudioProject = {
   customFonts: StudioFont[];
 };
 
+export type WritingDocumentStats = Record<WritingCounterKey, number>;
+
 export type ProjectStats = {
   volumes: number;
   chapters: number;
@@ -189,7 +193,7 @@ export function createId(prefix: string) {
 
 export function createDefaultSettings(): StudioSettings {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     id: "studio-settings",
     revision: 1,
     savedRevision: 1,
@@ -206,6 +210,13 @@ export function createDefaultSettings(): StudioSettings {
     paperColorMode: "light",
     customColors: [],
     quoteStyle: "french",
+    writingCounters: {
+      words: true,
+      paragraphs: false,
+      pages: false,
+      characters: false,
+      symbols: true,
+    },
     shortcuts: {
       save: "Ctrl+S",
       focus: "Ctrl+Shift+F",
@@ -223,7 +234,7 @@ export function normalizeSettings(value: unknown): StudioSettings {
   const validStandardIds = new Set<string>(STANDARD_FONTS.map((font) => font.id));
   const revision = Number.isFinite(input.revision) ? Math.max(1, Number(input.revision)) : 1;
   const legacyPaperBackground = normalizeColor(input.paperBackground, defaults.paperBackground);
-  const paperBackground = input.schemaVersion !== 2 && legacyPaperBackground.toLowerCase() === "#f7f4ed"
+  const paperBackground = Number(input.schemaVersion ?? 0) < 2 && legacyPaperBackground.toLowerCase() === "#f7f4ed"
     ? defaults.paperBackground
     : legacyPaperBackground;
   return {
@@ -266,6 +277,13 @@ export function normalizeSettings(value: unknown): StudioSettings {
       ? input.customColors.flatMap((color) => normalizeColor(color, "") ? [color] : []).slice(0, 3)
       : [],
     quoteStyle: input.quoteStyle === "straight" ? "straight" : "french",
+    writingCounters: {
+      words: input.writingCounters?.words !== false,
+      paragraphs: input.writingCounters?.paragraphs === true,
+      pages: input.writingCounters?.pages === true,
+      characters: input.writingCounters?.characters === true,
+      symbols: input.writingCounters?.symbols !== false,
+    },
     shortcuts: {
       save: normalizeShortcut(input.shortcuts?.save, defaults.shortcuts.save),
       focus: normalizeShortcut(input.shortcuts?.focus, defaults.shortcuts.focus),
@@ -330,6 +348,57 @@ export function stripHtml(html: string) {
   return (container.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
+export function getVolumePages(volume: StudioVolume) {
+  return volume.chapters.flatMap((chapter) => chapter.pages);
+}
+
+export function createEmptyVolume(index = 1, title = `Volume ${index}`): StudioVolume {
+  return {
+    id: createId("volume"),
+    title,
+    chapters: [{ id: createId("chapter"), title: "Contenu", pages: [createEmptyPage()] }],
+  };
+}
+
+export function getWritingDocumentStats(volume: StudioVolume): WritingDocumentStats {
+  const pages = getVolumePages(volume);
+  const plainPages = pages.map((page) => plainTextWithSpacing(page.content));
+  const text = plainPages.join("\n");
+  const words = text.trim() ? text.trim().split(/\s+/u).length : 0;
+  const paragraphs = pages.reduce((total, page) => total + countParagraphs(page.content), 0);
+  return {
+    words,
+    paragraphs,
+    pages: pages.length,
+    characters: [...text].filter((character) => !/\s/u.test(character)).length,
+    symbols: [...text].length,
+  };
+}
+
+function plainTextWithSpacing(html: string) {
+  if (typeof document === "undefined") {
+    return html
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(p|div|h[1-6]|blockquote|li)>/gi, "\n")
+      .replace(/<[^>]+>/g, "")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">");
+  }
+  const container = document.createElement("div");
+  container.innerHTML = html;
+  container.querySelectorAll("br").forEach((node) => node.replaceWith("\n"));
+  container.querySelectorAll("p,div,h1,h2,h3,h4,h5,h6,blockquote,li").forEach((node) => node.append("\n"));
+  return container.textContent ?? "";
+}
+
+function countParagraphs(html: string) {
+  if (!stripHtml(html)) return 0;
+  const matches = html.match(/<(p|div|h[1-6]|blockquote|li)(?:\s[^>]*)?>/gi);
+  return Math.max(1, matches?.length ?? 0);
+}
+
 export function getProjectStats(project: StudioProject): ProjectStats {
   const chapters = project.volumes.flatMap((volume) => volume.chapters);
   const pages = chapters.flatMap((chapter) => chapter.pages);
@@ -355,10 +424,7 @@ export function createBlankProject(name: string, projectType: ProjectType = "man
     defaultPageFormat: projectType === "novel" ? "novel" : projectType === "free" ? "free" : "a4",
     targetPages: 0, footerType: "none", footerText: "",
     createdAt: now, updatedAt: now, revision: 1, savedRevision: 0,
-    volumes: [{
-      id: createId("volume"), title: "Volume 1",
-      chapters: [{ id: createId("chapter"), title: "Chapitre 1", pages: [createEmptyPage()] }],
-    }],
+    volumes: [createEmptyVolume()],
     characters: [], notes: [], goals: [], customFonts: [],
   };
 }

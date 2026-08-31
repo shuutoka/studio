@@ -1,59 +1,93 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  Bold, Heading2, Italic, List, ListOrdered, Minus, Redo2,
-  Sigma, Underline, Undo2,
+  AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Eraser, FilePlus2,
+  ImagePlus, IndentDecrease, IndentIncrease, Italic, List, ListOrdered, Minus,
+  Moon, PanelBottom, Redo2, Sigma, Sun, Trash2, Underline, Undo2,
 } from "lucide-react";
 
 import { ColorPicker } from "@/components/studio/color-picker";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger,
+} from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { isSingleKeyShortcut, matchesShortcut } from "@/lib/shortcuts";
 import {
-  PAGE_FORMATS,
-  STANDARD_FONTS,
-  type CharacterShortcut,
-  type FooterType,
-  type PageFormat,
-  type QuoteStyle,
-  type StudioFont,
-  type StudioShortcuts,
-  type WritingColorMode,
+  PAGE_FORMATS, PROJECT_TYPE_LABELS, STANDARD_FONTS, type CharacterShortcut,
+  type FooterType, type PageFormat, type PageStatus, type ProjectType,
+  type QuoteStyle, type StudioFont, type StudioShortcuts, type WritingColorMode,
 } from "@/lib/studio";
 
-type RichTextEditorProps = {
-  documentId: string;
+export type RichTextEditorPage = {
+  id: string;
   html: string;
+  status: PageStatus;
+  typeOverride: ProjectType | null;
   format: PageFormat;
-  backgroundColor?: string;
-  colorMode?: WritingColorMode;
+  formatOverride: PageFormat | null;
+  backgroundColor: string;
+  colorMode: WritingColorMode;
+  ignoreFooter: boolean;
+  pageNumber: number;
+  position: number;
+};
+
+export type WritingNavigationTarget = {
+  pageId: string;
+  headingIndex?: number;
+  token: number;
+};
+
+type RichTextEditorProps = {
+  pages: RichTextEditorPage[];
+  selectedPageId: string | null;
+  defaultFormat: PageFormat;
+  defaultProjectType: ProjectType;
   customFonts: StudioFont[];
   enabledStandardFonts?: string[];
   quoteStyle?: QuoteStyle;
   shortcuts?: StudioShortcuts;
   characterShortcuts?: CharacterShortcut[];
-  footerType?: FooterType;
-  footerText?: string;
-  pageNumber?: number;
-  onChange: (html: string) => void;
-  onPageBreak?: () => void;
-  onOverflow?: (html: string) => void;
-  onNavigatePrevious?: () => void;
-  onNavigateNext?: () => void;
-  navigationLanding?: "top" | "bottom";
-  autoFocus?: boolean;
+  footerType: FooterType;
+  footerText: string;
+  navigationTarget?: WritingNavigationTarget | null;
+  onSelectPage: (pageId: string) => void;
+  onChange: (pageId: string, html: string) => void;
+  onPageBreak: (pageId: string) => void;
+  onOverflow: (pageId: string, html: string) => void;
+  onFormatChange: (pageId: string, format: PageFormat | null) => void;
+  onTypeChange: (pageId: string, type: ProjectType | null) => void;
+  onStatusChange: (pageId: string, status: PageStatus) => void;
+  onBackgroundChange: (color: string) => void;
+  onColorModeChange: (mode: WritingColorMode) => void;
+  onFooterChange: (type: FooterType, text: string) => void;
+  onToggleIgnoreFooter: (pageId: string) => void;
+  onDeletePage: (pageId: string) => void;
+  onError?: (message: string) => void;
 };
 
 const allowedElements = new Set([
-  "A", "B", "BLOCKQUOTE", "BR", "DIV", "EM", "FONT", "H1", "H2", "H3",
-  "HR", "I", "LI", "OL", "P", "SPAN", "STRIKE", "STRONG", "U", "UL",
+  "A", "B", "BLOCKQUOTE", "BR", "DIV", "EM", "FONT", "H1", "H2", "H3", "H4",
+  "HR", "I", "IMG", "LI", "OL", "P", "PRE", "S", "SPAN", "STRIKE", "STRONG",
+  "SUB", "SUP", "U", "UL",
 ]);
 
-const baseSpecialCharacters = ["—", "–", "…", "•", "©", "®", "™", "°", "±", "×", "÷", "œ", "Œ", "æ", "Æ"];
+const specialCharacterGroups = {
+  Typographie: ["« ", " »", "“", "”", "‘", "’", "‹", "›", "—", "–", "…", "•", "·", "‑", "§", "¶", "†", "‡", "№"],
+  "Accents et ligatures": ["À", "Á", "Â", "Ä", "Æ", "Ç", "È", "É", "Ê", "Ë", "Î", "Ï", "Ô", "Ö", "Œ", "Ù", "Û", "Ü", "Ÿ", "à", "â", "ä", "æ", "ç", "è", "é", "ê", "ë", "î", "ï", "ô", "ö", "œ", "ù", "û", "ü", "ÿ"],
+  Mathématiques: ["±", "×", "÷", "≠", "≈", "≤", "≥", "∞", "√", "∑", "∏", "∫", "∂", "∆", "π", "µ", "°", "‰", "½", "¼", "¾", "⅓", "⅔"],
+  Monnaies: ["€", "$", "£", "¥", "₩", "₹", "₽", "₿", "¢", "₫", "₴", "₦", "₱", "₪", "₡"],
+  Flèches: ["←", "↑", "→", "↓", "↔", "↕", "⇐", "⇒", "⇔", "↗", "↘", "↙", "↖", "↩", "↪", "⟵", "⟶", "⟷"],
+  Symboles: ["©", "®", "™", "✓", "✔", "✕", "✖", "★", "☆", "♥", "♡", "♦", "♣", "♠", "☀", "☁", "☂", "☕", "☎", "⚠", "♩", "♪", "♫"],
+  Grec: ["α", "β", "γ", "δ", "ε", "ζ", "η", "θ", "ι", "κ", "λ", "μ", "ν", "ξ", "π", "ρ", "σ", "τ", "φ", "χ", "ψ", "ω", "Γ", "Δ", "Θ", "Λ", "Σ", "Φ", "Ψ", "Ω"],
+  Emoji: ["😀", "😃", "😄", "😁", "😂", "😊", "😍", "😘", "😎", "🤔", "😐", "😢", "😭", "😡", "😱", "🥳", "🤖", "👻", "😈", "👍", "👎", "👏", "🙏", "💪", "👀", "❤️", "💔", "✨", "🔥", "💧", "🌙", "☀️", "⭐", "🌍", "🎉", "🎵", "📌", "✍️", "📖", "💡"],
+} satisfies Record<string, string[]>;
+
+const specialGroupNames = Object.keys(specialCharacterGroups) as Array<keyof typeof specialCharacterGroups>;
 const doublePressDelay = 450;
 
 function sanitizeHtml(html: string) {
@@ -66,82 +100,127 @@ function sanitizeHtml(html: string) {
     }
     [...element.attributes].forEach((attribute) => {
       const name = attribute.name.toLowerCase();
-      const allowed = name === "href" || name === "style" || name === "color" || name === "size" || name === "face";
+      const allowed = ["href", "style", "color", "size", "face", "src", "alt", "title"].includes(name);
       if (!allowed || name.startsWith("on")) element.removeAttribute(attribute.name);
     });
     if (element instanceof HTMLAnchorElement) {
       const href = element.getAttribute("href") ?? "";
       if (!/^(https?:|mailto:|#)/i.test(href)) element.removeAttribute("href");
     }
+    if (element instanceof HTMLImageElement) {
+      const src = element.getAttribute("src") ?? "";
+      if (!/^data:image\/(png|jpe?g|gif|webp);base64,/i.test(src)) element.remove();
+      else {
+        element.style.maxWidth = "100%";
+        element.style.height = "auto";
+      }
+    }
   });
   return parsed.body.innerHTML;
 }
 
 export function RichTextEditor({
-  documentId, html, format, backgroundColor = "#ffffff", customFonts,
-  colorMode = "light",
+  pages, selectedPageId, defaultFormat, customFonts,
+  defaultProjectType,
   enabledStandardFonts = STANDARD_FONTS.map((font) => font.id), quoteStyle = "french",
   shortcuts = { save: "Ctrl+S", focus: "Ctrl+Shift+F", pageBreak: "Ctrl+Enter", emDash: "Ctrl+-" },
-  characterShortcuts = [], footerType = "none", footerText = "", pageNumber = 1,
-  onChange, onPageBreak = () => undefined, onOverflow = () => undefined,
-  onNavigatePrevious, onNavigateNext, navigationLanding = "top", autoFocus = false,
+  characterShortcuts = [], footerType, footerText, navigationTarget,
+  onSelectPage, onChange, onPageBreak, onOverflow, onFormatChange, onTypeChange,
+  onStatusChange,
+  onBackgroundChange, onColorModeChange, onFooterChange, onToggleIgnoreFooter,
+  onDeletePage, onError = () => undefined,
 }: RichTextEditorProps) {
-  const editorRef = useRef<HTMLDivElement>(null);
-  const scrollHostRef = useRef<HTMLDivElement>(null);
-  const loadedDocumentId = useRef<string | null>(null);
+  const editorsRef = useRef(new Map<string, HTMLDivElement>());
+  const loadedHtmlRef = useRef(new Map<string, string>());
+  const savedRangeRef = useRef<Range | null>(null);
+  const activePageIdRef = useRef<string | null>(selectedPageId ?? pages[0]?.id ?? null);
   const pendingDoublePress = useRef<{ shortcut: string; fallback: string; timer: number } | null>(null);
   const nextFrenchQuoteIsOpening = useRef(true);
-  const wheelLockedUntil = useRef(0);
-  const [fillRatio, setFillRatio] = useState(0);
-  const formatDefinition = PAGE_FORMATS[format];
-  const hasPageLimit = formatDefinition.height !== null;
-  const darkBackground = colorMode === "dark";
-  const textColor = darkBackground ? "#eeeaf2" : "#29262b";
+  const imageInputRef = useRef<HTMLInputElement>(null);
+
+  const activePage = pages.find((page) => page.id === selectedPageId) ?? pages[0];
   const fonts = [
     ...STANDARD_FONTS.filter((font) => enabledStandardFonts.includes(font.id)),
     ...customFonts.filter((font) => font.enabled).map((font) => ({ id: font.id, label: font.name, family: font.family })),
   ];
 
-  const measureFill = useCallback(() => {
-    const editor = editorRef.current;
-    if (!editor || !hasPageLimit) { setFillRatio(0); return; }
-    setFillRatio(editor.clientHeight ? editor.scrollHeight / editor.clientHeight : 0);
-  }, [hasPageLimit]);
+  useEffect(() => {
+    pages.forEach((page) => {
+      const editor = editorsRef.current.get(page.id);
+      if (!editor) return;
+      const nextHtml = sanitizeHtml(page.html);
+      if (loadedHtmlRef.current.get(page.id) !== nextHtml && document.activeElement !== editor) {
+        editor.innerHTML = nextHtml;
+        loadedHtmlRef.current.set(page.id, nextHtml);
+      }
+    });
+    const ids = new Set(pages.map((page) => page.id));
+    [...loadedHtmlRef.current.keys()].forEach((id) => { if (!ids.has(id)) loadedHtmlRef.current.delete(id); });
+  }, [pages]);
 
   useEffect(() => {
-    if (editorRef.current && loadedDocumentId.current !== documentId) {
-      editorRef.current.innerHTML = sanitizeHtml(html);
-      loadedDocumentId.current = documentId;
-      nextFrenchQuoteIsOpening.current = true;
-      if (pendingDoublePress.current) window.clearTimeout(pendingDoublePress.current.timer);
-      pendingDoublePress.current = null;
-      window.requestAnimationFrame(() => {
-        measureFill();
-        const scrollHost = scrollHostRef.current;
-        if (scrollHost) scrollHost.scrollTop = navigationLanding === "bottom" ? scrollHost.scrollHeight : 0;
-        if (autoFocus && editorRef.current) placeCaretAtEnd(editorRef.current);
-      });
-    }
-  }, [autoFocus, documentId, html, measureFill, navigationLanding]);
+    activePageIdRef.current = selectedPageId ?? pages[0]?.id ?? null;
+  }, [pages, selectedPageId]);
 
-  useEffect(() => { window.requestAnimationFrame(measureFill); }, [format, footerType, measureFill]);
+  useEffect(() => {
+    if (!navigationTarget) return;
+    window.requestAnimationFrame(() => {
+      const editor = editorsRef.current.get(navigationTarget.pageId);
+      if (!editor) return;
+      const heading = navigationTarget.headingIndex === undefined
+        ? null
+        : editor.querySelectorAll("h1,h2,h3,h4").item(navigationTarget.headingIndex);
+      (heading ?? editor.closest("[data-writing-page]"))?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (heading instanceof HTMLElement) placeCaretAtStart(heading);
+      else placeCaretAtEnd(editor);
+    });
+  }, [navigationTarget]);
+
   useEffect(() => { nextFrenchQuoteIsOpening.current = true; }, [quoteStyle]);
   useEffect(() => () => {
     if (pendingDoublePress.current) window.clearTimeout(pendingDoublePress.current.timer);
   }, []);
 
-  function emitChange() {
-    if (!editorRef.current) return;
-    const overflow = hasPageLimit ? extractOverflowHtml(editorRef.current) : "";
-    onChange(sanitizeHtml(editorRef.current.innerHTML));
-    measureFill();
-    if (overflow) onOverflow(sanitizeHtml(overflow));
+  function rememberSelection(pageId: string) {
+    activePageIdRef.current = pageId;
+    if (pageId !== selectedPageId) onSelectPage(pageId);
+    const selection = window.getSelection();
+    const editor = editorsRef.current.get(pageId);
+    if (editor && selection?.rangeCount && editor.contains(selection.anchorNode)) savedRangeRef.current = selection.getRangeAt(0).cloneRange();
+  }
+
+  function restoreSelection() {
+    const pageId = activePageIdRef.current ?? pages[0]?.id;
+    if (!pageId) return null;
+    const editor = editorsRef.current.get(pageId);
+    if (!editor) return null;
+    editor.focus();
+    const range = savedRangeRef.current;
+    if (range && range.startContainer.isConnected && editor.contains(range.startContainer)) {
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    } else placeCaretAtEnd(editor);
+    return { editor, pageId };
+  }
+
+  function emitChange(pageId: string) {
+    const editor = editorsRef.current.get(pageId);
+    const page = pages.find((candidate) => candidate.id === pageId);
+    if (!editor || !page) return;
+    const overflow = PAGE_FORMATS[page.format].height === null ? "" : extractOverflowHtml(editor);
+    const nextHtml = sanitizeHtml(editor.innerHTML);
+    loadedHtmlRef.current.set(pageId, nextHtml);
+    onChange(pageId, nextHtml);
+    if (overflow) onOverflow(pageId, sanitizeHtml(overflow));
   }
 
   function run(command: string, value?: string) {
-    editorRef.current?.focus();
+    const active = restoreSelection();
+    if (!active) return;
     document.execCommand(command, false, value);
-    emitChange();
+    rememberSelection(active.pageId);
+    emitChange(active.pageId);
   }
 
   function insertText(value: string) {
@@ -156,14 +235,13 @@ export function RichTextEditor({
     if (pending.fallback) insertText(pending.fallback);
   }
 
-  function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+  function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>, pageId: string) {
+    activePageIdRef.current = pageId;
     const binding = characterShortcuts.find((item) => item.shortcut && matchesShortcut(event, item.shortcut));
-    if (pendingDoublePress.current && pendingDoublePress.current.shortcut !== binding?.shortcut) {
-      flushPendingDoublePress();
-    }
+    if (pendingDoublePress.current && pendingDoublePress.current.shortcut !== binding?.shortcut) flushPendingDoublePress();
     if (matchesShortcut(event, shortcuts.pageBreak)) {
       event.preventDefault();
-      onPageBreak();
+      onPageBreak(pageId);
       return;
     }
     if (matchesShortcut(event, shortcuts.emDash)) {
@@ -197,109 +275,182 @@ export function RichTextEditor({
     }
     if (event.key === "\"" && !event.ctrlKey && !event.metaKey && !event.altKey) {
       event.preventDefault();
-      if (quoteStyle === "straight") {
-        insertText("\"");
-      } else {
-        insertText(nextFrenchQuoteIsOpening.current ? "« " : " »");
-        nextFrenchQuoteIsOpening.current = !nextFrenchQuoteIsOpening.current;
+      insertText(quoteStyle === "straight" ? "\"" : nextFrenchQuoteIsOpening.current ? "« " : " »");
+      if (quoteStyle === "french") nextFrenchQuoteIsOpening.current = !nextFrenchQuoteIsOpening.current;
+    }
+  }
+
+  function insertImage(file: File | undefined) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { onError("Le fichier choisi n’est pas une image."); return; }
+    if (file.size > 8 * 1024 * 1024) { onError("L’image dépasse la limite de 8 Mo."); return; }
+    const reader = new FileReader();
+    reader.onerror = () => onError("L’image n’a pas pu être lue.");
+    reader.onload = () => {
+      const active = restoreSelection();
+      if (!active || typeof reader.result !== "string") return;
+      document.execCommand("insertImage", false, reader.result);
+      const images = active.editor.querySelectorAll("img");
+      const inserted = images.item(images.length - 1);
+      if (inserted) {
+        inserted.alt = file.name;
+        inserted.style.maxWidth = "100%";
+        inserted.style.height = "auto";
       }
-    }
+      emitChange(active.pageId);
+    };
+    reader.readAsDataURL(file);
   }
-
-  function handleWheel(event: React.WheelEvent<HTMLDivElement>) {
-    const now = performance.now();
-    if (now < wheelLockedUntil.current) return;
-    const host = event.currentTarget;
-    const atTop = host.scrollTop <= 2;
-    const atBottom = host.scrollHeight - host.clientHeight - host.scrollTop <= 2;
-    if (event.deltaY < 0 && atTop && onNavigatePrevious) {
-      event.preventDefault();
-      wheelLockedUntil.current = now + 280;
-      onNavigatePrevious();
-    } else if (event.deltaY > 0 && atBottom && onNavigateNext) {
-      event.preventDefault();
-      wheelLockedUntil.current = now + 280;
-      onNavigateNext();
-    }
-  }
-
-  const footer = footerType === "page"
-    ? `— ${pageNumber} —`
-    : footerType === "date"
-      ? new Intl.DateTimeFormat("fr-FR", { dateStyle: "long" }).format(new Date())
-      : footerType === "custom" ? footerText : "";
-  const specialCharacters = quoteStyle === "french"
-    ? ["« ", " »", ...baseSpecialCharacters]
-    : ["\"", "'", ...baseSpecialCharacters];
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/8 bg-[#111016] shadow-[0_24px_70px_rgba(0,0,0,.28)]">
-      <div className="flex flex-wrap items-center gap-1 border-b border-white/8 bg-[#17151d] px-3 py-2">
-        <Select defaultValue="p" onValueChange={(value) => run("formatBlock", value)}>
-          <SelectTrigger aria-label="Style du paragraphe" className="mr-1 w-[126px] border-white/10 bg-white/4" size="sm"><Heading2 className="size-4" /><SelectValue /></SelectTrigger>
-          <SelectContent><SelectItem value="p">Paragraphe</SelectItem><SelectItem value="h1">Titre 1</SelectItem><SelectItem value="h2">Titre 2</SelectItem><SelectItem value="h3">Titre 3</SelectItem><SelectItem value="blockquote">Citation</SelectItem></SelectContent>
-        </Select>
+    <div className="writing-editor-shell flex min-h-0 flex-1 flex-col overflow-hidden border-y border-white/8 bg-[#111016]">
+      <div className="writing-toolbar shrink-0 border-b border-white/8 bg-[#17151d] shadow-sm">
+        <div className="flex items-center gap-1 overflow-x-auto px-3 py-2">
+          <Select defaultValue="p" onValueChange={(value) => run("formatBlock", value)}>
+            <SelectTrigger aria-label="Style du texte" className="w-[150px] shrink-0 border-white/10 bg-white/4" size="sm"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="p">Corps de texte</SelectItem><SelectItem value="h1">Titre</SelectItem><SelectItem value="h2">Sous-titre</SelectItem><SelectItem value="h3">Titre de section</SelectItem><SelectItem value="h4">Sous-section</SelectItem><SelectItem value="blockquote">Citation</SelectItem><SelectItem value="pre">Texte préformaté</SelectItem></SelectContent>
+          </Select>
+          <Select defaultValue={fonts[0]?.family ?? "__none__"} onValueChange={(value) => { if (value !== "__none__") run("fontName", value); }}>
+            <SelectTrigger aria-label="Police" className="w-[150px] shrink-0 border-white/10 bg-white/4" size="sm"><SelectValue /></SelectTrigger>
+            <SelectContent>{fonts.length ? fonts.map((font) => <SelectItem key={font.id} value={font.family}>{font.label}</SelectItem>) : <SelectItem value="__none__">Aucune police</SelectItem>}</SelectContent>
+          </Select>
+          <Select defaultValue="3" onValueChange={(value) => run("fontSize", value)}>
+            <SelectTrigger aria-label="Taille du texte" className="w-[78px] shrink-0 border-white/10 bg-white/4" size="sm"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="1">9 pt</SelectItem><SelectItem value="2">10 pt</SelectItem><SelectItem value="3">12 pt</SelectItem><SelectItem value="4">14 pt</SelectItem><SelectItem value="5">18 pt</SelectItem><SelectItem value="6">24 pt</SelectItem><SelectItem value="7">32 pt</SelectItem></SelectContent>
+          </Select>
 
-        <Select defaultValue={fonts[0]?.family ?? "__none__"} onValueChange={(value) => { if (value !== "__none__") run("fontName", value); }}>
-          <SelectTrigger aria-label="Police" className="w-[142px] border-white/10 bg-white/4" size="sm"><SelectValue /></SelectTrigger>
-          <SelectContent>{fonts.length ? fonts.map((font) => <SelectItem key={font.id} value={font.family}>{font.label}</SelectItem>) : <SelectItem value="__none__">Aucune police active</SelectItem>}</SelectContent>
-        </Select>
+          <ToolbarDivider />
+          <ToolbarButton label="Gras" onClick={() => run("bold")}><Bold /></ToolbarButton>
+          <ToolbarButton label="Italique" onClick={() => run("italic")}><Italic /></ToolbarButton>
+          <ToolbarButton label="Souligné" onClick={() => run("underline")}><Underline /></ToolbarButton>
+          <ColorPicker label="Couleur du texte" value="#29262b" onChange={(value) => run("foreColor", value)} />
+          <ColorPicker label="Surligner le texte" value="#fff19a" onChange={(value) => run("hiliteColor", value)} className="text-[#ffd75f]" />
+          <ToolbarDivider />
+          <ToolbarButton label="Liste à puces" onClick={() => run("insertUnorderedList")}><List /></ToolbarButton>
+          <ToolbarButton label="Liste numérotée" onClick={() => run("insertOrderedList")}><ListOrdered /></ToolbarButton>
+          <ToolbarButton label="Séparateur" onClick={() => run("insertHorizontalRule")}><Minus /></ToolbarButton>
+          <ToolbarDivider />
+          <ToolbarButton label="Aligner à gauche" onClick={() => run("justifyLeft")}><AlignLeft /></ToolbarButton>
+          <ToolbarButton label="Centrer" onClick={() => run("justifyCenter")}><AlignCenter /></ToolbarButton>
+          <ToolbarButton label="Aligner à droite" onClick={() => run("justifyRight")}><AlignRight /></ToolbarButton>
+          <ToolbarButton label="Justifier" onClick={() => run("justifyFull")}><AlignJustify /></ToolbarButton>
+          <ToolbarButton label="Diminuer le retrait" onClick={() => run("outdent")}><IndentDecrease /></ToolbarButton>
+          <ToolbarButton label="Augmenter le retrait" onClick={() => run("indent")}><IndentIncrease /></ToolbarButton>
+          <ToolbarDivider />
+          <ToolbarButton label="Ajouter une image" onClick={() => imageInputRef.current?.click()}><ImagePlus /></ToolbarButton>
+          <input ref={imageInputRef} className="hidden" type="file" accept="image/*" onChange={(event) => { insertImage(event.target.files?.[0]); event.target.value = ""; }} />
+          <ToolbarButton label="Supprimer la mise en forme" onClick={() => run("removeFormat")}><Eraser /></ToolbarButton>
+          <ToolbarButton label="Annuler" onClick={() => run("undo")}><Undo2 /></ToolbarButton>
+          <ToolbarButton label="Rétablir" onClick={() => run("redo")}><Redo2 /></ToolbarButton>
 
-        <Select defaultValue="3" onValueChange={(value) => run("fontSize", value)}>
-          <SelectTrigger aria-label="Taille du texte" className="w-[76px] border-white/10 bg-white/4" size="sm"><SelectValue /></SelectTrigger>
-          <SelectContent><SelectItem value="1">9 pt</SelectItem><SelectItem value="2">10 pt</SelectItem><SelectItem value="3">12 pt</SelectItem><SelectItem value="4">14 pt</SelectItem><SelectItem value="5">18 pt</SelectItem><SelectItem value="6">24 pt</SelectItem><SelectItem value="7">32 pt</SelectItem></SelectContent>
-        </Select>
-
-        <ToolbarButton label="Gras" onClick={() => run("bold")}><Bold /></ToolbarButton>
-        <ToolbarButton label="Italique" onClick={() => run("italic")}><Italic /></ToolbarButton>
-        <ToolbarButton label="Souligné" onClick={() => run("underline")}><Underline /></ToolbarButton>
-        <span className="mx-1 h-5 w-px bg-white/10" />
-        <ToolbarButton label="Liste à puces" onClick={() => run("insertUnorderedList")}><List /></ToolbarButton>
-        <ToolbarButton label="Liste numérotée" onClick={() => run("insertOrderedList")}><ListOrdered /></ToolbarButton>
-        <ToolbarButton label="Séparateur" onClick={() => run("insertHorizontalRule")}><Minus /></ToolbarButton>
-        <ColorPicker label="Couleur du texte" value={textColor} onChange={(value) => run("foreColor", value)} />
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild><Button aria-label="Caractères spéciaux" title="Caractères spéciaux" type="button" variant="ghost" size="icon-sm" className="text-[#aaa4b4]"><Sigma /></Button></DropdownMenuTrigger>
-          <DropdownMenuContent className="grid grid-cols-4 gap-1 p-2">
-            {specialCharacters.map((character, index) => <DropdownMenuItem key={`${character}-${index}`} className="grid size-9 place-items-center p-0 text-base" onSelect={() => insertText(character)}>{character}</DropdownMenuItem>)}
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <span className="mx-1 h-5 w-px bg-white/10" />
-        <ToolbarButton label="Annuler" onClick={() => run("undo")}><Undo2 /></ToolbarButton>
-        <ToolbarButton label="Rétablir" onClick={() => run("redo")}><Redo2 /></ToolbarButton>
-      </div>
-
-      <div ref={scrollHostRef} className="min-h-0 flex-1 overflow-auto bg-[#09080b] p-4 sm:p-7" onWheel={handleWheel}>
-        <div
-          className={`mx-auto flex flex-col overflow-hidden shadow-[0_18px_55px_rgba(0,0,0,.45)] ${hasPageLimit ? "paper-sheet" : "rounded-xl border border-white/8"}`}
-          style={{
-            backgroundColor,
-            color: textColor,
-            width: hasPageLimit ? `min(100%, ${formatDefinition.width}px)` : "100%",
-            ...(hasPageLimit ? { aspectRatio: `${formatDefinition.width} / ${formatDefinition.height}` } : { minHeight: 460 }),
-          }}
-        >
-          <div
-            ref={editorRef}
-            className={`studio-editor min-h-0 flex-1 px-[clamp(1.5rem,8%,5rem)] py-[clamp(2rem,9%,5rem)] text-[16px] leading-7 outline-none ${hasPageLimit ? "overflow-hidden" : "overflow-y-auto"} ${darkBackground ? "editor-dark-surface" : "paper-editor"}`}
-            contentEditable role="textbox" aria-label="Contenu de la page" aria-multiline="true"
-            suppressContentEditableWarning onInput={emitChange} onKeyDown={handleKeyDown}
-          />
-          {footer && <div className="shrink-0 border-t border-current/10 px-8 py-3 text-center text-[11px] opacity-65">{footer}</div>}
+          <div className="sticky right-0 ml-auto flex shrink-0 items-center gap-1 border-l border-white/10 bg-[#17151d] pl-2">
+            <FooterPopover page={activePage} footerType={footerType} footerText={footerText} onFooterChange={onFooterChange} onToggleIgnoreFooter={onToggleIgnoreFooter} />
+            <SpecialCharactersPopover onInsert={insertText} />
+          </div>
         </div>
+
+        {activePage && <div className="flex items-center gap-2 overflow-x-auto border-t border-white/7 px-3 py-1.5 text-xs text-[#8f8996]">
+          <span className="shrink-0 font-medium text-[#c8c2cf]">Page {activePage.position}</span>
+          <Select value={activePage.typeOverride ?? "inherit"} onValueChange={(value) => onTypeChange(activePage.id, value === "inherit" ? null : value as ProjectType)}>
+            <SelectTrigger aria-label="Type d’écriture de la page" className="h-7 w-[155px] shrink-0 border-white/10 bg-white/3 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="inherit">Type : {PROJECT_TYPE_LABELS[defaultProjectType]}</SelectItem>{Object.entries(PROJECT_TYPE_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
+          </Select>
+          <Select value={activePage.status} onValueChange={(value: PageStatus) => onStatusChange(activePage.id, value)}>
+            <SelectTrigger aria-label="État de la page" className="h-7 w-[105px] shrink-0 border-white/10 bg-white/3 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="draft">Brouillon</SelectItem><SelectItem value="review">À relire</SelectItem><SelectItem value="done">Terminée</SelectItem></SelectContent>
+          </Select>
+          <Select value={activePage.formatOverride ?? "inherit"} onValueChange={(value) => onFormatChange(activePage.id, value === "inherit" ? null : value as PageFormat)}>
+            <SelectTrigger aria-label="Format de la page" className="h-7 w-[175px] shrink-0 border-white/10 bg-white/3 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="inherit">Format : {PAGE_FORMATS[defaultFormat].label}</SelectItem>{Object.entries(PAGE_FORMATS).map(([value, format]) => <SelectItem key={value} value={value}>{format.label} — {format.detail}</SelectItem>)}</SelectContent>
+          </Select>
+          <Button aria-label="Fond clair" title="Fond clair" aria-pressed={activePage.colorMode === "light"} size="icon-xs" variant={activePage.colorMode === "light" ? "default" : "ghost"} className={activePage.colorMode === "light" ? "bg-[#ef4f5f] text-white" : ""} onClick={() => onColorModeChange("light")}><Sun /></Button>
+          <Button aria-label="Fond sombre" title="Fond sombre" aria-pressed={activePage.colorMode === "dark"} size="icon-xs" variant={activePage.colorMode === "dark" ? "default" : "ghost"} className={activePage.colorMode === "dark" ? "bg-[#ef4f5f] text-white" : ""} onClick={() => onColorModeChange("dark")}><Moon /></Button>
+          <ColorPicker label="Couleur du fond" value={activePage.backgroundColor} onChange={onBackgroundChange} />
+          <Button size="sm" variant={activePage.ignoreFooter ? "secondary" : "ghost"} className="h-7 shrink-0 text-xs" onClick={() => onToggleIgnoreFooter(activePage.id)}><PanelBottom /> {activePage.ignoreFooter ? "Page hors pied" : "Ignorer au pied"}</Button>
+          <Button size="sm" variant="ghost" className="h-7 shrink-0 text-xs" onClick={() => onPageBreak(activePage.id)}><FilePlus2 /> Nouvelle page</Button>
+          <Button aria-label="Supprimer la page" title="Supprimer la page" size="icon-xs" variant="ghost" className="shrink-0 text-[#a49eab] hover:text-[#ff7885]" onClick={() => onDeletePage(activePage.id)}><Trash2 /></Button>
+        </div>}
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/8 bg-[#17151d] px-4 py-2 text-[11px] text-[#77717f]">
-        <span>{formatDefinition.label} · {formatDefinition.detail}</span>
-        <span>{shortcuts.pageBreak} : nouvelle page</span>
-        {hasPageLimit && <span className={fillRatio > 1 ? "font-semibold text-[#ff7885]" : "text-[#8f8996]"}>{fillRatio > 1 ? `Dépassement estimé : ${Math.round((fillRatio - 1) * 100)} %` : `Remplissage estimé : ${Math.round(fillRatio * 100)} %`}</span>}
+      <div className="writing-page-stack min-h-0 flex-1 overflow-y-auto bg-[#09080b] px-4 py-8 sm:px-8">
+        {pages.map((page) => {
+          const format = PAGE_FORMATS[page.format];
+          const limited = format.height !== null;
+          const textColor = page.colorMode === "dark" ? "#eeeaf2" : "#29262b";
+          const footer = page.ignoreFooter ? "" : footerType === "page" ? `— ${page.pageNumber} —` : footerType === "date" ? new Intl.DateTimeFormat("fr-FR", { dateStyle: "long" }).format(new Date()) : footerType === "custom" ? footerText : "";
+          return <div key={page.id} data-writing-page={page.id} className="group/page mx-auto mb-10 w-fit max-w-full scroll-mt-36">
+            <div className="mb-2 flex items-center justify-between px-1 text-[11px] text-[#69636f]"><span>Page {page.position}</span><span>{format.label}</span></div>
+            <div
+              className={`writing-page relative flex max-w-full flex-col overflow-hidden border transition ${page.id === activePage?.id ? "border-[#ef4f5f]/55 shadow-[0_22px_70px_rgba(0,0,0,.5)]" : "border-black/30 shadow-[0_18px_55px_rgba(0,0,0,.38)]"} ${limited ? "paper-sheet" : "rounded-xl"}`}
+              style={{ backgroundColor: page.backgroundColor, color: textColor, width: `min(calc(100vw - 4rem), ${format.width}px)`, ...(limited ? { aspectRatio: `${format.width} / ${format.height}` } : { minHeight: 520 }) }}
+              onMouseDown={() => { activePageIdRef.current = page.id; if (page.id !== selectedPageId) onSelectPage(page.id); }}
+            >
+              <div
+                ref={(node) => { if (node) { editorsRef.current.set(page.id, node); if (!loadedHtmlRef.current.has(page.id)) { const initial = sanitizeHtml(page.html); node.innerHTML = initial; loadedHtmlRef.current.set(page.id, initial); } } else editorsRef.current.delete(page.id); }}
+                className={`studio-editor min-h-0 flex-1 overflow-hidden px-[clamp(1.5rem,8%,5rem)] py-[clamp(2rem,9%,5rem)] text-[16px] leading-7 outline-none ${page.colorMode === "dark" ? "editor-dark-surface" : "paper-editor"}`}
+                contentEditable role="textbox" aria-label={`Contenu de la page ${page.position}`} aria-multiline="true"
+                suppressContentEditableWarning
+                onFocus={() => rememberSelection(page.id)}
+                onMouseUp={() => rememberSelection(page.id)}
+                onKeyUp={() => rememberSelection(page.id)}
+                onKeyDown={(event) => handleKeyDown(event, page.id)}
+                onInput={() => emitChange(page.id)}
+              />
+              {footer && <div className="shrink-0 border-t border-current/10 px-8 py-3 text-center text-[11px] opacity-65">{footer}</div>}
+            </div>
+          </div>;
+        })}
       </div>
     </div>
   );
 }
 
+function FooterPopover({ page, footerType, footerText, onFooterChange, onToggleIgnoreFooter }: {
+  page?: RichTextEditorPage;
+  footerType: FooterType;
+  footerText: string;
+  onFooterChange: (type: FooterType, text: string) => void;
+  onToggleIgnoreFooter: (pageId: string) => void;
+}) {
+  return <Popover>
+    <PopoverTrigger asChild><Button aria-label="Pied de page" title="Pied de page" type="button" variant="ghost" size="sm" className="h-8 shrink-0 text-[#c8c2cf]"><PanelBottom /> Pied de page</Button></PopoverTrigger>
+    <PopoverContent align="end" className="w-80 border-white/10 bg-[#1b1821] text-[#eeeaf2]">
+      <PopoverHeader className="mb-4"><PopoverTitle>Pied de page du projet</PopoverTitle></PopoverHeader>
+      <div className="grid gap-4">
+        <label className="grid gap-1.5 text-xs text-[#aaa4b4]">Contenu<Select value={footerType} onValueChange={(value: FooterType) => onFooterChange(value, footerText)}><SelectTrigger className="w-full border-white/10 bg-black/20"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">Aucun</SelectItem><SelectItem value="page">Numérotation</SelectItem><SelectItem value="date">Date actuelle</SelectItem><SelectItem value="custom">Texte personnalisé</SelectItem></SelectContent></Select></label>
+        {footerType === "custom" && <label className="grid gap-1.5 text-xs text-[#aaa4b4]">Texte<Input value={footerText} className="border-white/10 bg-black/20" onChange={(event) => onFooterChange("custom", event.target.value)} /></label>}
+        {page && <div className="flex items-center justify-between gap-4 rounded-xl border border-white/8 bg-black/15 p-3"><div><p className="text-sm font-medium text-white">Ignorer la page {page.position}</p><p className="mt-1 text-[11px] leading-4 text-[#77717f]">Elle n’affiche aucun pied et ne compte pas dans la numérotation.</p></div><Switch checked={page.ignoreFooter} onCheckedChange={() => onToggleIgnoreFooter(page.id)} /></div>}
+      </div>
+    </PopoverContent>
+  </Popover>;
+}
+
+function SpecialCharactersPopover({ onInsert }: { onInsert: (character: string) => void }) {
+  const [group, setGroup] = useState<(typeof specialGroupNames)[number]>("Typographie");
+  const [search, setSearch] = useState("");
+  const characters = useMemo(() => {
+    if (!search.trim()) return specialCharacterGroups[group];
+    const query = search.trim().toLocaleLowerCase("fr");
+    return specialGroupNames.flatMap((name) => specialCharacterGroups[name].map((character) => ({ name, character })))
+      .filter((item) => item.name.toLocaleLowerCase("fr").includes(query) || item.character.includes(query))
+      .map((item) => item.character);
+  }, [group, search]);
+  return <Popover>
+    <PopoverTrigger asChild><Button aria-label="Caractères spéciaux" title="Caractères spéciaux" type="button" variant="default" size="sm" className="h-8 shrink-0 bg-[#ef4f5f] text-white hover:bg-[#ff6675]"><Sigma /> Caractères spéciaux</Button></PopoverTrigger>
+    <PopoverContent align="end" className="w-[min(92vw,540px)] border-white/10 bg-[#1b1821] p-0 text-[#eeeaf2]">
+      <div className="border-b border-white/8 p-4"><PopoverHeader><PopoverTitle>Caractères spéciaux et emoji</PopoverTitle></PopoverHeader><Input aria-label="Rechercher un caractère" value={search} placeholder="Rechercher une catégorie…" className="mt-3 border-white/10 bg-black/20" onChange={(event) => setSearch(event.target.value)} /></div>
+      {!search && <div className="flex gap-1 overflow-x-auto border-b border-white/8 px-3 py-2">{specialGroupNames.map((name) => <button key={name} type="button" className={`shrink-0 rounded-md px-2.5 py-1.5 text-xs ${group === name ? "bg-[#ef4f5f]/16 text-[#ff8a95]" : "text-[#8f8996] hover:bg-white/5 hover:text-white"}`} onClick={() => setGroup(name)}>{name}</button>)}</div>}
+      <div className="grid max-h-72 grid-cols-8 gap-1 overflow-y-auto p-3 sm:grid-cols-10">{characters.map((character, index) => <button key={`${character}-${index}`} type="button" title={character} className="grid aspect-square place-items-center rounded-md border border-white/6 bg-white/3 text-base hover:border-[#ef4f5f]/35 hover:bg-[#ef4f5f]/10" onMouseDown={(event) => event.preventDefault()} onClick={() => onInsert(character)}>{character}</button>)}</div>
+    </PopoverContent>
+  </Popover>;
+}
+
 function ToolbarButton({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
-  return <Button aria-label={label} title={label} type="button" variant="ghost" size="icon-sm" className="text-[#aaa4b4] hover:bg-white/7 hover:text-white" onMouseDown={(event) => event.preventDefault()} onClick={onClick}>{children}</Button>;
+  return <Button aria-label={label} title={label} type="button" variant="ghost" size="icon-sm" className="shrink-0 text-[#aaa4b4] hover:bg-white/7 hover:text-white" onMouseDown={(event) => event.preventDefault()} onClick={onClick}>{children}</Button>;
+}
+
+function ToolbarDivider() {
+  return <span aria-hidden="true" className="mx-1 h-5 w-px shrink-0 bg-white/10" />;
 }
 
 function extractOverflowHtml(editor: HTMLDivElement) {
@@ -310,7 +461,6 @@ function extractOverflowHtml(editor: HTMLDivElement) {
   const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
   let startNode: Text | null = null;
   let startOffset = 0;
-
   while (walker.nextNode()) {
     const textNode = walker.currentNode as Text;
     if (!textNode.data) continue;
@@ -318,7 +468,6 @@ function extractOverflowHtml(editor: HTMLDivElement) {
     wholeRange.selectNodeContents(textNode);
     const lastRect = [...wholeRange.getClientRects()].at(-1);
     if (!lastRect || lastRect.bottom <= bottomLimit) continue;
-
     let low = 0;
     let high = textNode.data.length;
     while (low < high) {
@@ -331,15 +480,11 @@ function extractOverflowHtml(editor: HTMLDivElement) {
       else high = middle - 1;
     }
     startOffset = low;
-    const wordBoundary = Math.max(
-      textNode.data.lastIndexOf(" ", Math.max(0, startOffset - 1)),
-      textNode.data.lastIndexOf("\n", Math.max(0, startOffset - 1)),
-    );
+    const wordBoundary = Math.max(textNode.data.lastIndexOf(" ", Math.max(0, startOffset - 1)), textNode.data.lastIndexOf("\n", Math.max(0, startOffset - 1)));
     if (wordBoundary >= Math.max(0, startOffset - 40)) startOffset = wordBoundary + 1;
     startNode = textNode;
     break;
   }
-
   const range = document.createRange();
   if (startNode) range.setStart(startNode, startOffset);
   else {
@@ -355,7 +500,7 @@ function extractOverflowHtml(editor: HTMLDivElement) {
   return container.innerHTML;
 }
 
-function placeCaretAtEnd(editor: HTMLDivElement) {
+function placeCaretAtEnd(editor: HTMLElement) {
   editor.focus();
   const range = document.createRange();
   range.selectNodeContents(editor);
@@ -363,4 +508,15 @@ function placeCaretAtEnd(editor: HTMLDivElement) {
   const selection = window.getSelection();
   selection?.removeAllRanges();
   selection?.addRange(range);
+}
+
+function placeCaretAtStart(element: HTMLElement) {
+  element.scrollIntoView({ behavior: "smooth", block: "center" });
+  const range = document.createRange();
+  range.selectNodeContents(element);
+  range.collapse(true);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  (element.closest("[contenteditable]") as HTMLElement | null)?.focus();
 }

@@ -1,4 +1,4 @@
-const CACHE_NAME = "enfer-fatal-studio-v4-hotfix";
+const CACHE_NAME = "enfer-fatal-studio-v5-writing";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => {

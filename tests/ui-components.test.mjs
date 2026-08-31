@@ -111,6 +111,9 @@ test("migrates the former cream paper and page footer settings", async () => {
   assert.equal(normalizedSettings.zoom, 125);
   assert.equal(normalizedSettings.paperBackground, "#ffffff");
   assert.equal(normalizedSettings.paperColorMode, "light");
+  assert.equal(normalizedSettings.writingCounters.words, true);
+  assert.equal(normalizedSettings.writingCounters.symbols, true);
+  assert.equal(normalizedSettings.writingCounters.pages, false);
 
   const legacyProject = createBlankProject("Ancien projet", "novel");
   legacyProject.schemaVersion = 3;
@@ -125,17 +128,48 @@ test("migrates the former cream paper and page footer settings", async () => {
   assert.equal(normalizedProject.volumes[0].chapters[0].pages[0].ignoreProjectFooter, false);
 });
 
-test("the writing toolbar uses the bounded color picker", async () => {
+test("the writing toolbar exposes the complete document controls", async () => {
   const { RichTextEditor } = await vite.ssrLoadModule("/components/studio/rich-text-editor.tsx");
   const html = renderToStaticMarkup(React.createElement(RichTextEditor, {
-    documentId: "page-test",
-    html: "",
-    format: "a4",
+    pages: [{ id: "page-test", html: "", status: "draft", typeOverride: null, format: "a4", formatOverride: null, backgroundColor: "#ffffff", colorMode: "light", ignoreFooter: false, pageNumber: 1, position: 1 }],
+    selectedPageId: "page-test",
+    defaultFormat: "a4",
+    defaultProjectType: "novel",
     customFonts: [],
+    footerType: "page",
+    footerText: "",
+    onSelectPage() {},
     onChange() {},
+    onPageBreak() {},
+    onOverflow() {},
+    onFormatChange() {},
+    onTypeChange() {},
+    onStatusChange() {},
+    onBackgroundChange() {},
+    onColorModeChange() {},
+    onFooterChange() {},
+    onToggleIgnoreFooter() {},
+    onDeletePage() {},
   }));
 
   assert.match(html, /aria-label="Couleur du texte"/);
   assert.match(html, /aria-label="Caractères spéciaux"/);
+  assert.match(html, /aria-label="Ajouter une image"/);
+  assert.match(html, /aria-label="Justifier"/);
+  assert.match(html, /aria-label="Pied de page"/);
   assert.doesNotMatch(html, /type="color"/);
+});
+
+test("counts a complete writing volume", async () => {
+  const { createBlankProject, createEmptyPage, getWritingDocumentStats } = await vite.ssrLoadModule("/lib/studio.ts");
+  const project = createBlankProject("Compteurs", "novel");
+  const volume = project.volumes[0];
+  volume.chapters[0].pages[0].content = "<h1>Premier titre</h1><p>Deux mots</p>";
+  volume.chapters[0].pages.push({ ...createEmptyPage(2), content: "<p>Troisième ligne.</p>" });
+  const stats = getWritingDocumentStats(volume);
+
+  assert.equal(stats.pages, 2);
+  assert.equal(stats.paragraphs, 3);
+  assert.equal(stats.words, 6);
+  assert.ok(stats.symbols > stats.characters);
 });
