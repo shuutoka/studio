@@ -40,6 +40,14 @@ export async function downloadStudioBackup(
       ...character.imageIds,
       ...character.outfits.flatMap((outfit) => outfit.imageIds),
     ])),
+    ...projects.flatMap((project) => project.boards.flatMap((board) => [
+      ...(board.bannerMediaId ? [board.bannerMediaId] : []),
+      ...board.nodes.flatMap((node) => node.imageId ? [node.imageId] : []),
+      ...board.history.flatMap((entry) => [
+        ...(entry.snapshot.bannerMediaId ? [entry.snapshot.bannerMediaId] : []),
+        ...entry.snapshot.nodes.flatMap((node) => node.imageId ? [node.imageId] : []),
+      ]),
+    ])),
   ]);
   const media = (await loadAllMedia()).filter((item) => referencedMediaIds.has(item.id));
   const mediaEntries: Record<string, Uint8Array> = {};
@@ -66,7 +74,7 @@ export async function downloadStudioBackup(
   const savedSettings = { ...settings, savedRevision: settings.revision };
   const manifest = {
     format: "enfer-fatal-studio-backup",
-    formatVersion: 3,
+    formatVersion: 4,
     exportedAt: new Date().toISOString(),
     projectCount: savedProjects.length,
     media: manifestMedia,

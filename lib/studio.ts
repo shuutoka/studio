@@ -11,6 +11,9 @@ export type QuoteStyle = "straight" | "french";
 export type FooterType = "none" | "page" | "date" | "custom";
 export type ShortcutPressMode = "single" | "double";
 export type WritingCounterKey = "words" | "paragraphs" | "pages" | "characters" | "symbols";
+export type BoardType = "tree" | "relationship";
+export type BoardTheme = "dark" | "light";
+export type BoardNodeKind = "text" | "image" | "character" | "group";
 
 export const PROJECT_TYPE_LABELS: Record<ProjectType, string> = {
   manga: "Manga / BD",
@@ -110,6 +113,60 @@ export type StudioCharacter = {
 export type StudioNote = { id: string; title: string; content: string };
 export type StudioGoal = { id: string; title: string; description: string; status: GoalStatus };
 
+export type StudioBoardFolder = {
+  id: string;
+  name: string;
+  order: number;
+};
+
+export type StudioBoardNode = {
+  id: string;
+  kind: BoardNodeKind;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  title: string;
+  text: string;
+  color: string;
+  imageId: string | null;
+  characterId: string | null;
+  characterIds: string[];
+};
+
+export type StudioBoardEdge = {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  label: string;
+  color: string;
+};
+
+export type StudioBoardSnapshot = {
+  name: string;
+  description: string;
+  theme: BoardTheme;
+  cardColor: string;
+  bannerMediaId: string | null;
+  folderId: string | null;
+  nodes: StudioBoardNode[];
+  edges: StudioBoardEdge[];
+};
+
+export type StudioBoardHistoryEntry = {
+  id: string;
+  label: string;
+  createdAt: string;
+  snapshot: StudioBoardSnapshot;
+};
+
+export type StudioBoard = StudioBoardSnapshot & {
+  id: string;
+  type: BoardType;
+  order: number;
+  history: StudioBoardHistoryEntry[];
+};
+
 export type StudioFont = {
   id: string;
   name: string;
@@ -128,7 +185,7 @@ export type StudioSystemFont = {
 export type StudioMedia = {
   id: string;
   projectId: string;
-  kind: "character-image" | "outfit-image" | "font";
+  kind: "character-image" | "outfit-image" | "board-image" | "font";
   name: string;
   mimeType: string;
   createdAt: string;
@@ -174,7 +231,7 @@ export type StudioSettings = {
 };
 
 export type StudioProject = {
-  schemaVersion: 4;
+  schemaVersion: 5;
   id: string;
   name: string;
   description: string;
@@ -192,6 +249,8 @@ export type StudioProject = {
   characters: StudioCharacter[];
   notes: StudioNote[];
   goals: StudioGoal[];
+  boardFolders: StudioBoardFolder[];
+  boards: StudioBoard[];
   /** Kept for migration from v2 saves. New fonts live in StudioSettings. */
   customFonts: StudioFont[];
 };
@@ -411,6 +470,23 @@ export function createEmptyVolume(index = 1, title = `Volume ${index}`): StudioV
   };
 }
 
+export function createEmptyBoard(name = "Nouvel arbre", type: BoardType = "tree", order = 0): StudioBoard {
+  return {
+    id: createId("board"),
+    name: name.trim() || (type === "tree" ? "Nouvel arbre" : "Nouveau diagramme"),
+    type,
+    description: "",
+    theme: "dark",
+    cardColor: "#17151d",
+    bannerMediaId: null,
+    folderId: null,
+    order,
+    nodes: [],
+    edges: [],
+    history: [],
+  };
+}
+
 export function getWritingDocumentStats(volume: StudioVolume): WritingDocumentStats {
   const pages = getVolumePages(volume);
   const plainPages = pages.map((page) => plainTextWithSpacing(page.content));
@@ -470,13 +546,13 @@ export function getProjectStats(project: StudioProject): ProjectStats {
 export function createBlankProject(name: string, projectType: ProjectType = "manga"): StudioProject {
   const now = new Date().toISOString();
   return {
-    schemaVersion: 4, id: createId("project"), name: name.trim() || "Projet sans titre",
+    schemaVersion: 5, id: createId("project"), name: name.trim() || "Projet sans titre",
     description: "", status: "idea", projectType,
     defaultPageFormat: projectType === "novel" ? "novel" : projectType === "free" ? "free" : "a4",
     targetPages: 0, footerType: "none", footerText: "",
     createdAt: now, updatedAt: now, revision: 1, savedRevision: 0,
     volumes: [createEmptyVolume()],
-    characters: [], notes: [], goals: [], customFonts: [],
+    characters: [], notes: [], goals: [], boardFolders: [], boards: [], customFonts: [],
   };
 }
 
@@ -560,6 +636,78 @@ function normalizeCharacter(value: Partial<StudioCharacter>): StudioCharacter {
   };
 }
 
+function normalizeBoardNode(value: Partial<StudioBoardNode>, index: number): StudioBoardNode {
+  const kind = ["text", "image", "character", "group"].includes(value.kind ?? "")
+    ? value.kind as BoardNodeKind
+    : "text";
+  const defaultSize = kind === "group"
+    ? { width: 420, height: 280 }
+    : kind === "character"
+      ? { width: 220, height: 150 }
+      : { width: 240, height: 170 };
+  return {
+    id: typeof value.id === "string" && value.id ? value.id : createId("board-node"),
+    kind,
+    x: Number.isFinite(value.x) ? Math.max(0, Number(value.x)) : 120 + (index % 4) * 280,
+    y: Number.isFinite(value.y) ? Math.max(0, Number(value.y)) : 120 + Math.floor(index / 4) * 220,
+    width: Number.isFinite(value.width) ? Math.max(160, Number(value.width)) : defaultSize.width,
+    height: Number.isFinite(value.height) ? Math.max(110, Number(value.height)) : defaultSize.height,
+    title: typeof value.title === "string" ? value.title : kind === "character" ? "Personnage" : "Nouvelle boîte",
+    text: typeof value.text === "string" ? value.text : "",
+    color: normalizeColor(value.color, "#26222d"),
+    imageId: typeof value.imageId === "string" ? value.imageId : null,
+    characterId: typeof value.characterId === "string" ? value.characterId : null,
+    characterIds: Array.isArray(value.characterIds)
+      ? value.characterIds.filter((id): id is string => typeof id === "string")
+      : [],
+  };
+}
+
+function normalizeBoardSnapshot(value: Partial<StudioBoardSnapshot>): StudioBoardSnapshot {
+  const nodes = Array.isArray(value.nodes) ? value.nodes.map(normalizeBoardNode) : [];
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  return {
+    name: typeof value.name === "string" && value.name.trim() ? value.name.trim() : "Tableau sans titre",
+    description: typeof value.description === "string" ? value.description : "",
+    theme: value.theme === "light" ? "light" : "dark",
+    cardColor: normalizeColor(value.cardColor, value.theme === "light" ? "#ffffff" : "#17151d"),
+    bannerMediaId: typeof value.bannerMediaId === "string" ? value.bannerMediaId : null,
+    folderId: typeof value.folderId === "string" ? value.folderId : null,
+    nodes,
+    edges: Array.isArray(value.edges) ? value.edges.flatMap((edge) => {
+      if (!edge || typeof edge !== "object") return [];
+      if (typeof edge.sourceId !== "string" || typeof edge.targetId !== "string") return [];
+      if (!nodeIds.has(edge.sourceId) || !nodeIds.has(edge.targetId) || edge.sourceId === edge.targetId) return [];
+      return [{
+        id: typeof edge.id === "string" && edge.id ? edge.id : createId("board-edge"),
+        sourceId: edge.sourceId,
+        targetId: edge.targetId,
+        label: typeof edge.label === "string" ? edge.label : "",
+        color: normalizeColor(edge.color, "#ef6977"),
+      } satisfies StudioBoardEdge];
+    }) : [],
+  };
+}
+
+function normalizeBoard(value: Partial<StudioBoard>, index: number): StudioBoard {
+  const snapshot = normalizeBoardSnapshot(value);
+  return {
+    ...snapshot,
+    id: typeof value.id === "string" && value.id ? value.id : createId("board"),
+    type: value.type === "relationship" ? "relationship" : "tree",
+    order: Number.isFinite(value.order) ? Number(value.order) : index,
+    history: Array.isArray(value.history) ? value.history.slice(-40).flatMap((entry) => {
+      if (!entry || typeof entry !== "object" || typeof entry.label !== "string") return [];
+      return [{
+        id: typeof entry.id === "string" && entry.id ? entry.id : createId("board-history"),
+        label: entry.label,
+        createdAt: typeof entry.createdAt === "string" ? entry.createdAt : new Date().toISOString(),
+        snapshot: normalizeBoardSnapshot(entry.snapshot ?? {}),
+      } satisfies StudioBoardHistoryEntry];
+    }) : [],
+  };
+}
+
 export function normalizeProject(value: unknown): StudioProject {
   if (!value || typeof value !== "object") throw new Error("Le projet est invalide.");
   const input = value as Partial<StudioProject>;
@@ -572,7 +720,7 @@ export function normalizeProject(value: unknown): StudioProject {
     .flatMap((chapter) => chapter.pages ?? [])
     .find((page) => page.footerType && page.footerType !== "none");
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     id: input.id,
     name: input.name,
     description: typeof input.description === "string" ? input.description : "",
@@ -609,6 +757,15 @@ export function normalizeProject(value: unknown): StudioProject {
       description: typeof goal.description === "string" ? goal.description : "",
       status: ["todo", "doing", "done"].includes(goal.status ?? "") ? goal.status as GoalStatus : "todo",
     })) : [],
+    boardFolders: Array.isArray(input.boardFolders) ? input.boardFolders.flatMap((folder, index) => {
+      if (!folder || typeof folder !== "object") return [];
+      return [{
+        id: typeof folder.id === "string" && folder.id ? folder.id : createId("board-folder"),
+        name: typeof folder.name === "string" && folder.name.trim() ? folder.name.trim() : `Dossier ${index + 1}`,
+        order: Number.isFinite(folder.order) ? Number(folder.order) : index,
+      } satisfies StudioBoardFolder];
+    }) : [],
+    boards: Array.isArray(input.boards) ? input.boards.map(normalizeBoard) : [],
     customFonts: Array.isArray(input.customFonts) ? input.customFonts.flatMap((font) => {
       if (typeof font?.id !== "string" || typeof font.name !== "string" || typeof font.family !== "string" || typeof font.mediaId !== "string") return [];
       return [{ ...font, enabled: font.enabled !== false }];

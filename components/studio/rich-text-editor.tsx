@@ -189,23 +189,6 @@ export function RichTextEditor({
   useEffect(() => () => {
     if (pendingDoublePress.current) window.clearTimeout(pendingDoublePress.current.timer);
   }, []);
-  useEffect(() => {
-    const stack = pageStackRef.current;
-    if (!stack) return;
-    const forwardWheel = (event: WheelEvent) => {
-      if (!(event.target instanceof Element) || !event.target.closest("[data-writing-page]") || !event.deltaY) return;
-      event.preventDefault();
-      const multiplier = event.deltaMode === WheelEvent.DOM_DELTA_LINE
-        ? 24
-        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
-          ? stack.clientHeight
-          : 1;
-      stack.scrollTop += event.deltaY * multiplier;
-    };
-    stack.addEventListener("wheel", forwardWheel, { passive: false });
-    return () => stack.removeEventListener("wheel", forwardWheel);
-  }, []);
-
   function rememberSelection(pageId: string) {
     activePageIdRef.current = pageId;
     if (pageId !== selectedPageId) onSelectPage(pageId);

@@ -13,6 +13,9 @@ lisible `.efstudio.zip`.
 - éditeur enrichi : titres, polices, tailles, gras, italique, souligné, couleur et listes ;
 - ajout de polices personnalisées TTF, OTF, WOFF et WOFF2 ;
 - fiches de personnages avancées avec recherche, tags, images, tenues et relations ;
+- arbres narratifs sur canevas quadrillé avec boîtes texte, images, personnages, groupes et connexions ;
+- diagrammes de relations dont les bulles grandissent selon le nombre de liens ;
+- gestion des tableaux : dossiers, ordre, duplication, apparence, bannière et historique restaurable ;
 - bibliothèque générale des personnages de tous les projets ;
 - objectifs en colonnes « À faire / En cours / Terminé » ;
 - carnet de notes ;
@@ -26,7 +29,7 @@ lisible `.efstudio.zip`.
 - paramètres inclus dans la sauvegarde : format, nom, thèmes, zoom, sons et raccourcis ;
 - gestion globale des polices intégrées et personnalisées ;
 - visionneuse filtrable de toutes les images, avec agrandissement ;
-- mode focus pour l’écriture, fonds personnalisables et pieds de page ;
+- mode focus pour l’écriture, défilement natif fluide, fonds personnalisables et pieds de page ;
 - caractères spéciaux, guillemets et raccourcis d’écriture personnalisables ;
 - export d’un manuscrit en DOC, DOCX, ODT, PDF, HTML ou TXT ;
 - fonctionnement hors ligne progressif grâce au service worker.
@@ -71,7 +74,7 @@ enfer-fatal-studio.efs
 ├── manifest.json
 ├── studio.json
 └── media/
-    ├── images et tenues
+    ├── images, tenues et médias des tableaux
     └── polices personnalisées
 ```
 

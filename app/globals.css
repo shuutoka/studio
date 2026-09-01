@@ -273,7 +273,6 @@ textarea {
 }
 
 .writing-page-stack {
-  scroll-behavior: smooth;
   overscroll-behavior: contain;
 }
 

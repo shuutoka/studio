@@ -1,4 +1,4 @@
-const CACHE_NAME = "enfer-fatal-studio-v6-1-scroll-hotfix";
+const CACHE_NAME = "enfer-fatal-studio-v7-story-boards";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => {

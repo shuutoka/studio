@@ -326,6 +326,7 @@ export function StudioAppV3() {
               project={activeProject} section={section} selectedPageId={selectedPageId}
               selectedCharacterId={selectedCharacterId} selectedNoteId={selectedNoteId}
               onSelectPage={setSelectedPageId} onSelectCharacter={setSelectedCharacterId}
+              onOpenCharacter={(id) => { setSelectedCharacterId(id); setSection("characters"); }}
               onSelectNote={setSelectedNoteId} updateProject={updateActiveProject}
               uploadMedia={uploadMedia} removeMedia={deleteMedia}
               onDeleteProject={() => setDeleteTarget(activeProject)} settings={settings}

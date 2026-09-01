@@ -21,6 +21,7 @@ import {
   Import,
   LayoutDashboard,
   Library,
+  Network,
   NotebookPen,
   Plus,
   Save,
@@ -32,6 +33,7 @@ import {
 import { toast } from "sonner";
 
 import { CharacterManager } from "@/components/studio/character-manager";
+import { BoardsWorkspace } from "@/components/studio/boards-workspace";
 import { GlobalLibrary } from "@/components/studio/global-library";
 import { GoalsBoard } from "@/components/studio/goals-board";
 import { useProjectFonts } from "@/components/studio/use-project-fonts";
@@ -108,13 +110,14 @@ import {
   type StudioSettings,
 } from "@/lib/studio";
 
-export type Section = "dashboard" | "writing" | "characters" | "notes";
+export type Section = "dashboard" | "writing" | "characters" | "boards" | "notes";
 type GlobalView = "home" | "library" | "media" | "settings";
 
 export const sectionItems: Array<{ id: Section; label: string; icon: typeof LayoutDashboard }> = [
   { id: "dashboard", label: "Tableau de bord", icon: LayoutDashboard },
   { id: "writing", label: "Écriture", icon: BookOpen },
   { id: "characters", label: "Personnages", icon: Users },
+  { id: "boards", label: "Tableaux", icon: Network },
   { id: "notes", label: "Notes", icon: NotebookPen },
 ];
 
@@ -711,6 +714,7 @@ export function ProjectWorkspace({
   selectedNoteId,
   onSelectPage,
   onSelectCharacter,
+  onOpenCharacter,
   onSelectNote,
   updateProject,
   uploadMedia,
@@ -728,6 +732,7 @@ export function ProjectWorkspace({
   selectedNoteId: string | null;
   onSelectPage: (id: string) => void;
   onSelectCharacter: (id: string) => void;
+  onOpenCharacter?: (id: string) => void;
   onSelectNote: (id: string) => void;
   updateProject: (mutate: (draft: StudioProject) => void) => void;
   uploadMedia: (files: File[], kind: StudioMedia["kind"]) => Promise<string[]>;
@@ -742,6 +747,7 @@ export function ProjectWorkspace({
   const effectiveUpdateSettings = updateSettings ?? (() => undefined);
   if (section === "writing") return <WritingWorkspace project={project} selectedPageId={selectedPageId} onSelectPage={onSelectPage} updateProject={updateProject} settings={effectiveSettings} updateSettings={effectiveUpdateSettings} focusMode={focusMode} onToggleFocus={onToggleFocus} />;
   if (section === "characters") return <CharacterManager project={project} selectedCharacterId={selectedCharacterId} onSelectCharacter={onSelectCharacter} updateProject={updateProject} uploadMedia={uploadMedia} removeMedia={removeMedia} />;
+  if (section === "boards") return <BoardsWorkspace project={project} updateProject={updateProject} uploadMedia={uploadMedia} onOpenCharacter={onOpenCharacter ?? onSelectCharacter} />;
   if (section === "notes") return <NotesView project={project} selectedNoteId={selectedNoteId} onSelectNote={onSelectNote} updateProject={updateProject} />;
   return <DashboardView project={project} updateProject={updateProject} onDeleteProject={onDeleteProject} />;
 }

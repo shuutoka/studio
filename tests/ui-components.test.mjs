@@ -187,10 +187,42 @@ test("keeps the revised writing flow controls wired", async () => {
   assert.match(editorSource, /Titre H1/);
   assert.match(editorSource, /Chapitre — H2 centré/);
   assert.match(editorSource, /onPullBackward/);
-  assert.match(editorSource, /passive: false/);
+  assert.doesNotMatch(editorSource, /addEventListener\("wheel"/);
+  assert.doesNotMatch(editorSource, /event\.preventDefault\(\).*scrollTop/s);
   assert.match(settingsSource, /Activer les polices de ce PC/);
   assert.match(settingsSource, /queryLocalFonts/);
   assert.match(workspaceSource, /--studio-viewport-height/);
   assert.match(workspaceSource, /maxHeight: normalWorkspaceHeight/);
   assert.match(workspaceSource, /overflow-hidden/);
+});
+
+test("creates and migrates persistent story boards", async () => {
+  const { createBlankProject, createEmptyBoard, createId, normalizeProject } = await vite.ssrLoadModule("/lib/studio.ts");
+  const project = createBlankProject("Chronologie", "novel");
+  const board = createEmptyBoard("Ligne temporelle", "tree", 0);
+  const first = { id: createId("node"), kind: "text", x: 40, y: 80, width: 240, height: 170, title: "Début", text: "Incident", color: "#26222d", imageId: null, characterId: null, characterIds: [] };
+  const second = { ...first, id: createId("node"), x: 420, title: "Suite" };
+  board.nodes.push(first, second);
+  board.edges.push({ id: createId("edge"), sourceId: first.id, targetId: second.id, label: "Puis", color: "#ef6977" });
+  project.boards.push(board);
+  project.boardFolders.push({ id: "folder-timeline", name: "Temporalité", order: 0 });
+  project.boards[0].folderId = "folder-timeline";
+
+  const normalized = normalizeProject(project);
+  assert.equal(normalized.schemaVersion, 5);
+  assert.equal(normalized.boards[0].name, "Ligne temporelle");
+  assert.equal(normalized.boards[0].nodes.length, 2);
+  assert.equal(normalized.boards[0].edges[0].label, "Puis");
+  assert.equal(normalized.boardFolders[0].name, "Temporalité");
+});
+
+test("exposes tree and relationship board controls", async () => {
+  const source = await readFile(path.join(root, "components/studio/boards-workspace.tsx"), "utf8");
+  assert.match(source, /Nouvel arbre/);
+  assert.match(source, /Nouveau diagramme/);
+  assert.match(source, /Boîte personnage/);
+  assert.match(source, /Historique des actions/);
+  assert.match(source, /Fork :/);
+  assert.match(source, /Port gauche/);
+  assert.match(source, /Gérer les tableaux/);
 });
