@@ -225,4 +225,7 @@ test("exposes tree and relationship board controls", async () => {
   assert.match(source, /Fork :/);
   assert.match(source, /Port gauche/);
   assert.match(source, /Gérer les tableaux/);
+  assert.match(source, /Créer un arbre/);
+  assert.match(source, /Créer un diagramme/);
+  assert.match(source, /if \(!board\) return[\s\S]*?<CreateBoardDialog/);
 });

@@ -184,26 +184,20 @@ export function BoardsWorkspace({
 
   function confirmCreate() {
     if (!createDialog || !createName.trim()) return;
-    let newId = "";
+    const next = createEmptyBoard(createName, createDialog.type, project.boards.length);
+    if (createDialog.mode === "duplicate" && board) {
+      next.description = board.description;
+      next.theme = board.theme;
+      next.cardColor = board.cardColor;
+      next.bannerMediaId = board.bannerMediaId;
+      next.folderId = board.folderId;
+      next.nodes = structuredClone(board.nodes);
+      next.edges = structuredClone(board.edges);
+    }
     updateProject((draft) => {
-      const next = createEmptyBoard(createName, createDialog.type, draft.boards.length);
-      if (createDialog.mode === "duplicate" && board) {
-        const source = draft.boards.find((candidate) => candidate.id === board.id);
-        if (source) {
-          next.description = source.description;
-          next.theme = source.theme;
-          next.cardColor = source.cardColor;
-          next.bannerMediaId = source.bannerMediaId;
-          next.folderId = source.folderId;
-          next.nodes = structuredClone(source.nodes);
-          next.edges = structuredClone(source.edges);
-          next.history = [];
-        }
-      }
-      newId = next.id;
       draft.boards.push(next);
     });
-    selectBoard(newId);
+    selectBoard(next.id);
     setCreateDialog(null);
     toast.success(createDialog.mode === "duplicate" ? "Tableau dupliqué." : "Tableau créé.");
   }
@@ -363,7 +357,10 @@ export function BoardsWorkspace({
     }
   }
 
-  if (!board) return <EmptyBoards onCreate={beginCreate} />;
+  if (!board) return <div className="flex min-h-0 flex-1 flex-col bg-[#0c0b0f]">
+    <EmptyBoards onCreate={beginCreate} />
+    <CreateBoardDialog state={createDialog} name={createName} onNameChange={setCreateName} onClose={() => setCreateDialog(null)} onConfirm={confirmCreate} />
+  </div>;
 
   const boardBackground = board.theme === "light" ? "#f3f5f8" : "#0b0a0e";
   const gridColor = board.theme === "light" ? "rgba(36,39,49,.11)" : "rgba(255,255,255,.055)";
@@ -603,7 +600,7 @@ function CharacterPicker({ characters, onSelect, compact = false, mini = false }
 }
 
 function EmptyBoards({ onCreate }: { onCreate: (type: BoardType) => void }) {
-  return <div className="studio-page grid min-h-0 flex-1 place-items-center overflow-y-auto p-6"><div className="max-w-2xl text-center"><span className="mx-auto grid size-16 place-items-center rounded-2xl bg-[#ef4f5f]/10 text-[#ef6977]"><GitFork className="size-7" /></span><h1 className="mt-5 text-2xl font-bold text-white">Visualisez votre histoire</h1><p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-[#8f8996]">Créez un arbre pour organiser une temporalité et des évènements, ou un diagramme pour cartographier les relations entre personnages.</p><div className="mt-7 grid gap-3 sm:grid-cols-2"><button className="rounded-2xl border border-white/9 bg-[#15131a] p-5 text-left hover:border-[#ef4f5f]/35" onClick={() => onCreate("tree")}><ListTree className="mb-3 size-5 text-[#ef6977]" /><span className="block font-semibold text-white">Nouvel arbre</span><span className="mt-1 block text-xs leading-5 text-[#77717f]">Boîtes texte, images, personnages et groupes reliés.</span></button><button className="rounded-2xl border border-white/9 bg-[#15131a] p-5 text-left hover:border-[#ef4f5f]/35" onClick={() => onCreate("relationship")}><Network className="mb-3 size-5 text-[#ef6977]" /><span className="block font-semibold text-white">Nouveau diagramme</span><span className="mt-1 block text-xs leading-5 text-[#77717f]">Bulles de personnages dimensionnées par leurs relations.</span></button></div></div></div>;
+  return <div className="studio-page grid min-h-0 flex-1 place-items-center overflow-y-auto p-6"><div className="max-w-2xl text-center"><span className="mx-auto grid size-16 place-items-center rounded-2xl bg-[#ef4f5f]/10 text-[#ef6977]"><GitFork className="size-7" /></span><h1 className="mt-5 text-2xl font-bold text-white">Visualisez votre histoire</h1><p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-[#8f8996]">Créez un arbre pour organiser une temporalité et des évènements, ou un diagramme pour cartographier les relations entre personnages.</p><div className="mt-7 grid gap-3 sm:grid-cols-2"><article className="flex flex-col rounded-2xl border border-white/9 bg-[#15131a] p-5 text-left"><ListTree className="mb-3 size-5 text-[#ef6977]" /><span className="block font-semibold text-white">Arbre narratif</span><span className="mt-1 flex-1 text-xs leading-5 text-[#77717f]">Boîtes texte, images, personnages et groupes reliés.</span><Button className="mt-5 w-full bg-[#ef4f5f] text-white hover:bg-[#ff6675]" onClick={() => onCreate("tree")}><Plus /> Créer un arbre</Button></article><article className="flex flex-col rounded-2xl border border-white/9 bg-[#15131a] p-5 text-left"><Network className="mb-3 size-5 text-[#ef6977]" /><span className="block font-semibold text-white">Diagramme de relations</span><span className="mt-1 flex-1 text-xs leading-5 text-[#77717f]">Bulles de personnages dimensionnées par leurs relations.</span><Button className="mt-5 w-full bg-[#ef4f5f] text-white hover:bg-[#ff6675]" onClick={() => onCreate("relationship")}><Plus /> Créer un diagramme</Button></article></div></div></div>;
 }
 
 function ToolbarButton({ label, disabled, onClick, children }: { label: string; disabled?: boolean; onClick: () => void; children: React.ReactNode }) {
