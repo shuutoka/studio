@@ -11,6 +11,7 @@ import {
   RichTextEditor, type RichTextEditorPage, type WritingNavigationTarget,
 } from "@/components/studio/rich-text-editor";
 import { WritingExportButton } from "@/components/studio/writing-export-button";
+import { WritingImportButton } from "@/components/studio/writing-import-button";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -32,6 +33,7 @@ import {
   type StudioPage, type StudioProject, type StudioSettings, type StudioVolume,
   type WritingColorMode, type WritingCounterKey,
 } from "@/lib/studio";
+import type { ImportedWritingDocument } from "@/lib/writing-import";
 
 type PageLocation = { volume: StudioVolume; chapterId: string; page: StudioPage };
 type OutlineEntry = { pageId: string; headingIndex: number; level: number; label: string };
@@ -133,6 +135,13 @@ export function WritingWorkspace({
     const volume = createEmptyVolume(project.volumes.length + 1);
     updateProject((draft) => draft.volumes.push(volume));
     goToPage(getVolumePages(volume)[0].id);
+  }
+
+  function importWriting(document: ImportedWritingDocument) {
+    const volume = createEmptyVolume(project.volumes.length + 1, document.title);
+    volume.chapters[0].pages = document.pages.map((content, index) => ({ ...createEmptyPage(index + 1), content }));
+    updateProject((draft) => draft.volumes.push(volume));
+    goToPage(volume.chapters[0].pages[0].id);
   }
 
   function openRenameVolume(volume: StudioVolume) {
@@ -263,6 +272,7 @@ export function WritingWorkspace({
           <div className="ml-auto flex min-w-0 items-center gap-2">
             <div className="hidden items-center gap-1.5 overflow-x-auto sm:flex">{(Object.keys(counterLabels) as WritingCounterKey[]).filter((key) => settings.writingCounters[key]).map((key) => <Counter key={key} label={counterLabels[key]} value={documentStats[key]} />)}</div>
             <CounterSettings settings={settings} updateSettings={updateSettings} />
+            <WritingImportButton onImport={importWriting} />
             <WritingExportButton project={project} initialVolumeId={activeVolume?.id} compact />
             <div className={focusMode ? "" : "lg:hidden"}><Popover><PopoverTrigger asChild><Button size="sm" variant="outline" className="border-white/10"><ListTree /> Plan</Button></PopoverTrigger><PopoverContent align="end" className="max-h-[72svh] w-80 overflow-y-auto border-white/10 bg-[#17151d] p-2 text-[#eeeaf2]"><PopoverHeader className="px-2 py-2"><PopoverTitle>Plan du projet</PopoverTitle></PopoverHeader><OutlinePanel project={project} activeVolumeId={activeVolume?.id ?? null} outlines={outlines} collapsedVolumes={collapsedVolumes} setCollapsedVolumes={setCollapsedVolumes} onSelectVolume={selectVolume} onNavigate={goToPage} /></PopoverContent></Popover></div>
             <Button size="sm" variant="ghost" onClick={onToggleFocus}>{focusMode ? <Minimize2 /> : <Focus />}{focusMode ? "Quitter" : "Focus"}</Button>

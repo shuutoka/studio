@@ -14,6 +14,7 @@ export type WritingCounterKey = "words" | "paragraphs" | "pages" | "characters" 
 export type BoardType = "tree" | "relationship";
 export type BoardTheme = "dark" | "light";
 export type BoardNodeKind = "text" | "image" | "character" | "group";
+export type BoardAnchor = "left" | "right" | "top" | "bottom" | "top-left" | "top-right" | "bottom-left" | "bottom-right";
 
 export const PROJECT_TYPE_LABELS: Record<ProjectType, string> = {
   manga: "Manga / BD",
@@ -106,6 +107,7 @@ export type StudioCharacter = {
   notes: string;
   tags: string[];
   imageIds: string[];
+  thumbnailImageId: string | null;
   outfits: CharacterOutfit[];
   relations: CharacterRelation[];
 };
@@ -138,6 +140,8 @@ export type StudioBoardEdge = {
   id: string;
   sourceId: string;
   targetId: string;
+  sourceAnchor: BoardAnchor;
+  targetAnchor: BoardAnchor;
   label: string;
   color: string;
 };
@@ -185,7 +189,7 @@ export type StudioSystemFont = {
 export type StudioMedia = {
   id: string;
   projectId: string;
-  kind: "character-image" | "outfit-image" | "board-image" | "font";
+  kind: "character-image" | "outfit-image" | "board-image" | "project-banner" | "font";
   name: string;
   mimeType: string;
   createdAt: string;
@@ -207,12 +211,14 @@ export type StudioShortcuts = {
 };
 
 export type StudioSettings = {
-  schemaVersion: 4;
+  schemaVersion: 5;
   id: "studio-settings";
   revision: number;
   savedRevision: number;
   backupExtension: BackupExtension;
   backupFilename: string;
+  googleDriveClientId: string;
+  googleDriveFileId: string;
   theme: AppTheme;
   zoom: number;
   interfaceSound: InterfaceSound;
@@ -231,10 +237,12 @@ export type StudioSettings = {
 };
 
 export type StudioProject = {
-  schemaVersion: 5;
+  schemaVersion: 6;
   id: string;
   name: string;
   description: string;
+  cardColor: string;
+  bannerMediaId: string | null;
   status: ProjectStatus;
   projectType: ProjectType;
   defaultPageFormat: PageFormat;
@@ -279,12 +287,14 @@ export function createId(prefix: string) {
 
 export function createDefaultSettings(): StudioSettings {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     id: "studio-settings",
     revision: 1,
     savedRevision: 1,
     backupExtension: "efs",
     backupFilename: "enfer-fatal-studio",
+    googleDriveClientId: "",
+    googleDriveFileId: "",
     theme: "normal",
     zoom: 100,
     interfaceSound: "none",
@@ -337,6 +347,8 @@ export function normalizeSettings(value: unknown): StudioSettings {
       typeof input.backupFilename === "string" && input.backupFilename.trim()
         ? input.backupFilename.trim()
         : defaults.backupFilename,
+    googleDriveClientId: typeof input.googleDriveClientId === "string" ? input.googleDriveClientId.trim() : "",
+    googleDriveFileId: typeof input.googleDriveFileId === "string" ? input.googleDriveFileId.trim() : "",
     theme: ["normal", "dark", "light"].includes(input.theme ?? "")
       ? input.theme as AppTheme
       : defaults.theme,
@@ -434,6 +446,12 @@ function inferColorMode(value: unknown, fallback: WritingColorMode): WritingColo
   return (red * 299 + green * 587 + blue * 114) / 1000 < 145 ? "dark" : "light";
 }
 
+function normalizeBoardAnchor(value: unknown, fallback: BoardAnchor): BoardAnchor {
+  return ["left", "right", "top", "bottom", "top-left", "top-right", "bottom-left", "bottom-right"].includes(String(value))
+    ? value as BoardAnchor
+    : fallback;
+}
+
 export function createEmptyPage(index = 1): StudioPage {
   return {
     id: createId("page"), title: `Page ${index}`, content: "", status: "draft",
@@ -446,7 +464,7 @@ export function createEmptyPage(index = 1): StudioPage {
 export function createEmptyCharacter(name = "Nouveau personnage"): StudioCharacter {
   return {
     id: createId("character"), name, role: "", age: "", species: "", description: "",
-    appearance: "", personality: "", objectives: "", notes: "", tags: [], imageIds: [],
+    appearance: "", personality: "", objectives: "", notes: "", tags: [], imageIds: [], thumbnailImageId: null,
     outfits: [], relations: [],
   };
 }
@@ -546,8 +564,8 @@ export function getProjectStats(project: StudioProject): ProjectStats {
 export function createBlankProject(name: string, projectType: ProjectType = "manga"): StudioProject {
   const now = new Date().toISOString();
   return {
-    schemaVersion: 5, id: createId("project"), name: name.trim() || "Projet sans titre",
-    description: "", status: "idea", projectType,
+    schemaVersion: 6, id: createId("project"), name: name.trim() || "Projet sans titre",
+    description: "", cardColor: "#4d1824", bannerMediaId: null, status: "idea", projectType,
     defaultPageFormat: projectType === "novel" ? "novel" : projectType === "free" ? "free" : "a4",
     targetPages: 0, footerType: "none", footerText: "",
     createdAt: now, updatedAt: now, revision: 1, savedRevision: 0,
@@ -608,6 +626,7 @@ function normalizePage(value: Partial<StudioPage>, index: number): StudioPage {
 }
 
 function normalizeCharacter(value: Partial<StudioCharacter>): StudioCharacter {
+  const imageIds = Array.isArray(value.imageIds) ? value.imageIds.filter((id): id is string => typeof id === "string") : [];
   return {
     ...createEmptyCharacter(typeof value.name === "string" ? value.name : "Personnage"),
     id: typeof value.id === "string" ? value.id : createId("character"),
@@ -620,7 +639,10 @@ function normalizeCharacter(value: Partial<StudioCharacter>): StudioCharacter {
     objectives: typeof value.objectives === "string" ? value.objectives : "",
     notes: typeof value.notes === "string" ? value.notes : "",
     tags: Array.isArray(value.tags) ? value.tags.filter((tag): tag is string => typeof tag === "string") : [],
-    imageIds: Array.isArray(value.imageIds) ? value.imageIds.filter((id): id is string => typeof id === "string") : [],
+    imageIds,
+    thumbnailImageId: typeof value.thumbnailImageId === "string" && imageIds.includes(value.thumbnailImageId)
+      ? value.thumbnailImageId
+      : imageIds[0] ?? null,
     outfits: Array.isArray(value.outfits) ? value.outfits.map((outfit) => ({
       id: typeof outfit.id === "string" ? outfit.id : createId("outfit"),
       name: typeof outfit.name === "string" ? outfit.name : "Tenue",
@@ -682,6 +704,8 @@ function normalizeBoardSnapshot(value: Partial<StudioBoardSnapshot>): StudioBoar
         id: typeof edge.id === "string" && edge.id ? edge.id : createId("board-edge"),
         sourceId: edge.sourceId,
         targetId: edge.targetId,
+        sourceAnchor: normalizeBoardAnchor(edge.sourceAnchor, "right"),
+        targetAnchor: normalizeBoardAnchor(edge.targetAnchor, "left"),
         label: typeof edge.label === "string" ? edge.label : "",
         color: normalizeColor(edge.color, "#ef6977"),
       } satisfies StudioBoardEdge];
@@ -720,10 +744,12 @@ export function normalizeProject(value: unknown): StudioProject {
     .flatMap((chapter) => chapter.pages ?? [])
     .find((page) => page.footerType && page.footerType !== "none");
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     id: input.id,
     name: input.name,
     description: typeof input.description === "string" ? input.description : "",
+    cardColor: normalizeColor(input.cardColor, "#4d1824"),
+    bannerMediaId: typeof input.bannerMediaId === "string" ? input.bannerMediaId : null,
     status: ["idea", "draft", "revision", "done"].includes(input.status ?? "") ? input.status as ProjectStatus : "draft",
     projectType: ["manga", "novel", "script", "free"].includes(input.projectType ?? "") ? input.projectType as ProjectType : "manga",
     defaultPageFormat: ["free", "a4", "a5", "pocket", "novel", "large"].includes(input.defaultPageFormat ?? "") ? input.defaultPageFormat as PageFormat : "a4",

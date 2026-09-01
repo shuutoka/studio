@@ -34,8 +34,18 @@ export async function downloadStudioBackup(
   projects: StudioProject[],
   settings: StudioSettings,
 ) {
+  const backup = await createStudioBackup(projects, settings);
+  downloadBlob(backup.blob, backup.filename);
+}
+
+export async function createStudioBackup(
+  projects: StudioProject[],
+  settings: StudioSettings,
+  outputExtension: "efs" | "zip" = settings.backupExtension,
+) {
   const referencedMediaIds = new Set([
     ...settings.customFonts.map((font) => font.mediaId),
+    ...projects.flatMap((project) => project.bannerMediaId ? [project.bannerMediaId] : []),
     ...projects.flatMap((project) => project.characters.flatMap((character) => [
       ...character.imageIds,
       ...character.outfits.flatMap((outfit) => outfit.imageIds),
@@ -74,7 +84,7 @@ export async function downloadStudioBackup(
   const savedSettings = { ...settings, savedRevision: settings.revision };
   const manifest = {
     format: "enfer-fatal-studio-backup",
-    formatVersion: 4,
+    formatVersion: 5,
     exportedAt: new Date().toISOString(),
     projectCount: savedProjects.length,
     media: manifestMedia,
@@ -85,17 +95,17 @@ export async function downloadStudioBackup(
       "studio.json": strToU8(JSON.stringify({ projects: savedProjects, settings: savedSettings }, null, 2)),
       ...mediaEntries,
     },
-    { level: settings.backupExtension === "efs" ? 0 : 6 },
+    { level: outputExtension === "efs" ? 0 : 6 },
   );
   const payload = new Uint8Array(archive.byteLength);
   payload.set(archive);
-  const mime = settings.backupExtension === "efs"
+  const mime = outputExtension === "efs"
     ? "application/vnd.enfer-fatal-studio"
     : "application/zip";
-  downloadBlob(
-    new Blob([payload.buffer], { type: mime }),
-    `${safeFilename(settings.backupFilename)}.${settings.backupExtension}`,
-  );
+  return {
+    blob: new Blob([payload.buffer], { type: mime }),
+    filename: `${safeFilename(settings.backupFilename)}.${outputExtension}`,
+  };
 }
 
 export async function readStudioBackup(file: File): Promise<StudioBackup> {

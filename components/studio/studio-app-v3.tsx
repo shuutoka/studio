@@ -32,7 +32,12 @@ import {
 } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import { playInterfaceSound } from "@/lib/interface-sound";
-import { downloadStudioBackup, readStudioBackup } from "@/lib/project-file";
+import { optimizeImage } from "@/lib/image-optimization";
+import {
+  authorizeGoogleDrive, downloadGoogleDriveBackup, listGoogleDriveBackups,
+  saveBackupToGoogleDrive, type GoogleDriveBackupFile,
+} from "@/lib/google-drive";
+import { createStudioBackup, downloadStudioBackup, readStudioBackup } from "@/lib/project-file";
 import { isShortcutRecorderTarget, matchesShortcut } from "@/lib/shortcuts";
 import {
   deleteMedia, deleteStoredProject, loadProjects, loadSettings, persistMedia,
@@ -67,8 +72,11 @@ export function StudioAppV3() {
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectType, setNewProjectType] = useState<ProjectType>("manga");
   const [deleteTarget, setDeleteTarget] = useState<StudioProject | null>(null);
+  const [driveBusy, setDriveBusy] = useState(false);
+  const [driveFiles, setDriveFiles] = useState<GoogleDriveBackupFile[] | null>(null);
   const recoveryProjects = useRef<StudioProject[]>([]);
   const recoverySettings = useRef<StudioSettings>(createDefaultSettings());
+  const driveTokenRef = useRef<string | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
 
   const activeProject = useMemo(
@@ -176,6 +184,60 @@ export function StudioAppV3() {
     }
   }, [projects, settings]);
 
+  async function saveAllToDrive() {
+    setDriveBusy(true);
+    try {
+      const token = await authorizeGoogleDrive(settings.googleDriveClientId);
+      driveTokenRef.current = token;
+      const firstArchive = await createStudioBackup(projects, settings, "efs");
+      let driveFile = await saveBackupToGoogleDrive(token, firstArchive.blob, firstArchive.filename, settings.googleDriveFileId || undefined);
+      const revision = settings.googleDriveFileId === driveFile.id ? settings.revision : settings.revision + 1;
+      const finalSettings = { ...settings, googleDriveFileId: driveFile.id, revision };
+      if (settings.googleDriveFileId !== driveFile.id) {
+        const finalArchive = await createStudioBackup(projects, finalSettings, "efs");
+        driveFile = await saveBackupToGoogleDrive(token, finalArchive.blob, finalArchive.filename, driveFile.id);
+      }
+      setProjects((current) => current.map((project) => ({ ...project, savedRevision: project.revision })));
+      setSettings({ ...finalSettings, savedRevision: finalSettings.revision });
+      toast.success(`Sauvegarde .efs enregistrée sur Google Drive : ${driveFile.name}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "La sauvegarde Google Drive a échoué.");
+    } finally {
+      setDriveBusy(false);
+    }
+  }
+
+  async function openDriveBackups() {
+    setDriveBusy(true);
+    try {
+      const token = await authorizeGoogleDrive(settings.googleDriveClientId);
+      driveTokenRef.current = token;
+      const files = await listGoogleDriveBackups(token);
+      if (!files.length) toast.message("Aucune sauvegarde .efs accessible n’a été trouvée sur Google Drive.");
+      else setDriveFiles(files);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Google Drive n’est pas accessible.");
+    } finally {
+      setDriveBusy(false);
+    }
+  }
+
+  async function loadDriveBackup(file: GoogleDriveBackupFile) {
+    setDriveBusy(true);
+    try {
+      const token = driveTokenRef.current ?? await authorizeGoogleDrive(settings.googleDriveClientId);
+      driveTokenRef.current = token;
+      const downloaded = await downloadGoogleDriveBackup(token, file);
+      await importBackup(downloaded);
+      setSettings((current) => ({ ...current, googleDriveFileId: file.id }));
+      setDriveFiles(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Cette sauvegarde Drive n’a pas pu être chargée.");
+    } finally {
+      setDriveBusy(false);
+    }
+  }
+
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat || isShortcutRecorderTarget(event.target)) return;
@@ -266,12 +328,31 @@ export function StudioAppV3() {
 
   async function uploadMedia(files: File[], kind: StudioMedia["kind"]) {
     if (!activeProjectId || !files.length) return [];
-    const media = files.map((file) => ({
+    const optimizedFiles = kind === "font" ? files : await Promise.all(files.map(optimizeImage));
+    const media = optimizedFiles.map((file) => ({
       id: createId("media"), projectId: activeProjectId, kind, name: file.name,
       mimeType: file.type || "application/octet-stream", createdAt: new Date().toISOString(), blob: file,
     }) satisfies StudioMedia);
     await persistMedia(media);
     return media.map((item) => item.id);
+  }
+
+  async function customizeProjectCard(project: StudioProject, cardColor: string, bannerFile: File | null, removeBanner: boolean) {
+    let bannerMediaId = removeBanner ? null : project.bannerMediaId;
+    if (bannerFile) {
+      const optimized = await optimizeImage(bannerFile);
+      const mediaId = createId("media");
+      await persistMedia({
+        id: mediaId, projectId: project.id, kind: "project-banner", name: optimized.name,
+        mimeType: optimized.type || "image/webp", createdAt: new Date().toISOString(), blob: optimized,
+      });
+      bannerMediaId = mediaId;
+    }
+    if ((removeBanner || bannerFile) && project.bannerMediaId) await deleteMedia(project.bannerMediaId).catch(() => undefined);
+    setProjects((current) => current.map((item) => item.id === project.id ? {
+      ...item, cardColor, bannerMediaId, revision: item.revision + 1, updatedAt: new Date().toISOString(),
+    } : item));
+    toast.success("Carte du projet personnalisée.");
   }
 
   async function uploadFont(file: File) {
@@ -336,11 +417,11 @@ export function StudioAppV3() {
           ) : globalView === "library" ? (
             <GlobalLibrary projects={projects} onOpenCharacter={openGlobalCharacter} />
           ) : globalView === "media" ? (
-            <MediaGallery projects={projects} />
+            <MediaGallery projects={projects} onOpenProject={(project) => openProject(project)} onOpenCharacter={(project, characterId) => { openProject(project, "characters"); setSelectedCharacterId(characterId); }} />
           ) : globalView === "settings" ? (
-            <SettingsView settings={settings} updateSettings={updateSettings} onUploadFont={uploadFont} onRemoveFont={removeFont} />
+            <SettingsView settings={settings} updateSettings={updateSettings} onUploadFont={uploadFont} onRemoveFont={removeFont} onSaveDrive={saveAllToDrive} onLoadDrive={openDriveBackups} driveBusy={driveBusy} />
           ) : (
-            <HomeView projects={projects} onCreate={() => setCreateDialogOpen(true)} onImport={() => importInputRef.current?.click()} onOpen={openProject} onDelete={setDeleteTarget} onLibrary={() => showGlobal("library")} />
+            <HomeView projects={projects} onCreate={() => setCreateDialogOpen(true)} onImport={() => importInputRef.current?.click()} onOpen={openProject} onDelete={setDeleteTarget} onLibrary={() => showGlobal("library")} onCustomize={customizeProjectCard} />
           )}
         </SidebarInset>
       </div>
@@ -361,6 +442,8 @@ export function StudioAppV3() {
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
         <DialogContent className="border-white/10 bg-[#17151d] text-[#eeeaf2]"><DialogHeader><DialogTitle>Nouveau projet</DialogTitle><DialogDescription className="text-[#9c96a5]">Choisissez un type par défaut. Chaque page pourra ensuite utiliser un autre type.</DialogDescription></DialogHeader><div className="grid gap-4"><label className="grid gap-2 text-xs font-medium text-[#aaa4b4]">Nom du projet<Input autoFocus value={newProjectName} placeholder="Mon nouveau projet" className="border-white/10 bg-white/4" onChange={(event) => setNewProjectName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") createProject(); }} /></label><label className="grid gap-2 text-xs font-medium text-[#aaa4b4]">Type de projet<Select value={newProjectType} onValueChange={(value: ProjectType) => setNewProjectType(value)}><SelectTrigger className="w-full border-white/10 bg-white/4"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(PROJECT_TYPE_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select></label></div><DialogFooter><DialogClose asChild><Button variant="ghost">Annuler</Button></DialogClose><Button className="bg-[#ef4f5f] text-white" onClick={createProject}><Plus /> Créer le projet</Button></DialogFooter></DialogContent>
       </Dialog>
+
+      <Dialog open={Boolean(driveFiles)} onOpenChange={(open) => !open && setDriveFiles(null)}><DialogContent className="max-h-[82svh] overflow-hidden border-white/10 bg-[#17151d] text-[#eeeaf2]"><DialogHeader><DialogTitle>Charger depuis Google Drive</DialogTitle><DialogDescription className="text-[#9c96a5]">Choisissez la sauvegarde .efs qui remplacera les données actuellement ouvertes.</DialogDescription></DialogHeader><div className="max-h-[56svh] space-y-2 overflow-y-auto">{driveFiles?.map((file) => <button key={file.id} type="button" className="flex w-full items-center gap-3 rounded-xl border border-white/8 bg-white/3 p-3 text-left hover:border-[#ef4f5f]/35 hover:bg-[#ef4f5f]/6" disabled={driveBusy} onClick={() => void loadDriveBackup(file)}><FileArchive className="size-5 shrink-0 text-[#ef6977]" /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{file.name}</span><span className="mt-1 block text-[11px] text-[#77717f]">Modifié {new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium", timeStyle: "short" }).format(new Date(file.modifiedTime))}</span></span></button>)}</div><DialogFooter><DialogClose asChild><Button variant="ghost">Annuler</Button></DialogClose></DialogFooter></DialogContent></Dialog>
 
       <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}><AlertDialogContent className="border-white/10 bg-[#17151d] text-[#eeeaf2]"><AlertDialogHeader><AlertDialogTitle>Supprimer ce projet de l’appareil ?</AlertDialogTitle><AlertDialogDescription className="text-[#9c96a5]">« {deleteTarget?.name} », ses images et sa copie locale seront supprimés. Un fichier de sauvegarde déjà téléchargé restera intact.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel className="border-white/10 bg-transparent">Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={() => void confirmDeleteProject()}>Supprimer définitivement</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
       <Toaster theme={settings.theme === "light" ? "light" : "dark"} position="bottom-right" richColors />

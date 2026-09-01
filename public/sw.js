@@ -1,4 +1,4 @@
-const CACHE_NAME = "enfer-fatal-studio-v7-1-first-board-hotfix";
+const CACHE_NAME = "enfer-fatal-studio-v8-writing-boards-media-drive";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => {

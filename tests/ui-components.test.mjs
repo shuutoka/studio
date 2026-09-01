@@ -203,16 +203,17 @@ test("creates and migrates persistent story boards", async () => {
   const first = { id: createId("node"), kind: "text", x: 40, y: 80, width: 240, height: 170, title: "Début", text: "Incident", color: "#26222d", imageId: null, characterId: null, characterIds: [] };
   const second = { ...first, id: createId("node"), x: 420, title: "Suite" };
   board.nodes.push(first, second);
-  board.edges.push({ id: createId("edge"), sourceId: first.id, targetId: second.id, label: "Puis", color: "#ef6977" });
+  board.edges.push({ id: createId("edge"), sourceId: first.id, targetId: second.id, sourceAnchor: "right", targetAnchor: "left", label: "Puis", color: "#ef6977" });
   project.boards.push(board);
   project.boardFolders.push({ id: "folder-timeline", name: "Temporalité", order: 0 });
   project.boards[0].folderId = "folder-timeline";
 
   const normalized = normalizeProject(project);
-  assert.equal(normalized.schemaVersion, 5);
+  assert.equal(normalized.schemaVersion, 6);
   assert.equal(normalized.boards[0].name, "Ligne temporelle");
   assert.equal(normalized.boards[0].nodes.length, 2);
   assert.equal(normalized.boards[0].edges[0].label, "Puis");
+  assert.equal(normalized.boards[0].edges[0].sourceAnchor, "right");
   assert.equal(normalized.boardFolders[0].name, "Temporalité");
 });
 
@@ -223,9 +224,32 @@ test("exposes tree and relationship board controls", async () => {
   assert.match(source, /Boîte personnage/);
   assert.match(source, /Historique des actions/);
   assert.match(source, /Fork :/);
-  assert.match(source, /Port gauche/);
+  assert.match(source, /treeAnchors/);
+  assert.match(source, /relationshipEndpoints/);
+  assert.match(source, /Connexion en cours/);
   assert.match(source, /Gérer les tableaux/);
   assert.match(source, /Créer un arbre/);
   assert.match(source, /Créer un diagramme/);
+  assert.match(source, /Accueil des tableaux/);
   assert.match(source, /if \(!board\) return[\s\S]*?<CreateBoardDialog/);
+});
+
+test("wires manuscript import, Drive backups, WebP media and project card customization", async () => {
+  const writingImport = await readFile(path.join(root, "lib/writing-import.ts"), "utf8");
+  const drive = await readFile(path.join(root, "lib/google-drive.ts"), "utf8");
+  const optimizer = await readFile(path.join(root, "lib/image-optimization.ts"), "utf8");
+  const gallery = await readFile(path.join(root, "components/studio/media-gallery.tsx"), "utf8");
+  const characters = await readFile(path.join(root, "components/studio/character-manager.tsx"), "utf8");
+  const home = await readFile(path.join(root, "components/studio/studio-app.tsx"), "utf8");
+
+  assert.match(writingImport, /docxPages/);
+  assert.match(writingImport, /odtPages/);
+  assert.match(drive, /drive\.file/);
+  assert.match(drive, /uploadType=multipart/);
+  assert.match(optimizer, /image\/webp/);
+  assert.match(gallery, /Images uniquement/);
+  assert.match(gallery, /centré et recadré/);
+  assert.match(characters, /thumbnailImageId/);
+  assert.match(characters, /moveCharacterImage/);
+  assert.match(home, /Personnaliser la carte projet/);
 });

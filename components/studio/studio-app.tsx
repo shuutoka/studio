@@ -34,6 +34,7 @@ import { toast } from "sonner";
 
 import { CharacterManager } from "@/components/studio/character-manager";
 import { BoardsWorkspace } from "@/components/studio/boards-workspace";
+import { MediaPreview } from "@/components/studio/media-preview";
 import { GlobalLibrary } from "@/components/studio/global-library";
 import { GoalsBoard } from "@/components/studio/goals-board";
 import { useProjectFonts } from "@/components/studio/use-project-fonts";
@@ -94,6 +95,7 @@ import {
   persistProjects,
 } from "@/lib/studio-db";
 import { downloadProject, readProjectFile } from "@/lib/project-file";
+import { optimizeImage } from "@/lib/image-optimization";
 import {
   createBlankProject,
   createDefaultSettings,
@@ -327,7 +329,8 @@ export function StudioApp() {
 
   async function uploadMedia(files: File[], kind: StudioMedia["kind"]) {
     if (!activeProjectId || !files.length) return [];
-    const media = files.map((file) => ({
+    const optimizedFiles = kind === "font" ? files : await Promise.all(files.map(optimizeImage));
+    const media = optimizedFiles.map((file) => ({
       id: createId("media"),
       projectId: activeProjectId,
       kind,
@@ -624,6 +627,7 @@ export function HomeView({
   onOpen,
   onDelete,
   onLibrary,
+  onCustomize,
 }: {
   projects: StudioProject[];
   onCreate: () => void;
@@ -631,7 +635,12 @@ export function HomeView({
   onOpen: (project: StudioProject) => void;
   onDelete: (project: StudioProject) => void;
   onLibrary: () => void;
+  onCustomize?: (project: StudioProject, cardColor: string, bannerFile: File | null, removeBanner: boolean) => Promise<void> | void;
 }) {
+  const [customizing, setCustomizing] = useState<StudioProject | null>(null);
+  const [customColor, setCustomColor] = useState("#4d1824");
+  const [customBanner, setCustomBanner] = useState<File | null>(null);
+  const [removeBanner, setRemoveBanner] = useState(false);
   const totals = projects.reduce((result, project) => {
     const stats = getProjectStats(project);
     result.pages += stats.pages;
@@ -667,13 +676,15 @@ export function HomeView({
           <div className="mb-4 flex items-center justify-between"><h2 className="text-lg font-semibold text-white">Vos projets</h2><span className="text-xs text-[#77717f]">{projects.length} au total</span></div>
           {projects.length ? (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {projects.map((project, index) => {
+              {projects.map((project) => {
                 const stats = getProjectStats(project);
                 const dirty = project.revision !== project.savedRevision;
                 return (
                   <article key={project.id} className="group overflow-hidden rounded-2xl border border-white/8 bg-[#131218] transition-all hover:-translate-y-0.5 hover:border-white/14 hover:bg-[#17151d]">
                     <button className="w-full text-left" onClick={() => onOpen(project)}>
-                      <div className={`relative h-28 overflow-hidden ${index % 3 === 0 ? "bg-[linear-gradient(135deg,#4d1824,#17121a)]" : index % 3 === 1 ? "bg-[linear-gradient(135deg,#252050,#111824)]" : "bg-[linear-gradient(135deg,#183b3a,#111820)]"}`}>
+                      <div className="relative h-28 overflow-hidden" style={{ background: `linear-gradient(135deg, ${project.cardColor}, #111218)` }}>
+                        {project.bannerMediaId && <MediaPreview mediaId={project.bannerMediaId} alt={`Bannière de ${project.name}`} className="absolute inset-0 size-full opacity-75" />}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/45 to-transparent" />
                         <div className="absolute -right-4 -bottom-11 size-32 rounded-full border border-white/8" /><div className="absolute right-7 -bottom-14 size-32 rounded-full border border-white/5" /><BookOpen className="absolute bottom-4 left-5 size-7 text-white/72" />
                         <span className="absolute top-4 right-4 rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[.12em] text-white/70 backdrop-blur">{PROJECT_TYPE_LABELS[project.projectType]}</span>
                       </div>
@@ -685,7 +696,7 @@ export function HomeView({
                     </button>
                     <div className="flex justify-between border-t border-white/7 px-3 py-2">
                       <Button variant="ghost" size="sm" className="text-[#aaa4b4] hover:bg-white/6 hover:text-white" onClick={() => onOpen(project)}>Ouvrir <ChevronRight /></Button>
-                      <Button variant="ghost" size="sm" className="text-[#8c6670] hover:bg-[#ef4f5f]/10 hover:text-[#ff7c89]" onClick={() => onDelete(project)}><Trash2 /> Supprimer</Button>
+                      <div className="flex"><Button variant="ghost" size="sm" className="text-[#aaa4b4] hover:bg-white/6 hover:text-white" onClick={() => { setCustomizing(project); setCustomColor(project.cardColor); setCustomBanner(null); setRemoveBanner(false); }}><Settings2 /> Personnaliser</Button><Button variant="ghost" size="sm" className="text-[#8c6670] hover:bg-[#ef4f5f]/10 hover:text-[#ff7c89]" onClick={() => onDelete(project)}><Trash2 /> Supprimer</Button></div>
                     </div>
                   </article>
                 );
@@ -698,6 +709,7 @@ export function HomeView({
           )}
         </section>
       </div>
+      <Dialog open={Boolean(customizing)} onOpenChange={(open) => !open && setCustomizing(null)}><DialogContent className="border-white/10 bg-[#17151d] text-[#eeeaf2]"><DialogHeader><DialogTitle>Personnaliser la carte projet</DialogTitle><DialogDescription className="text-[#9c96a5]">Choisissez sa couleur et, si vous le souhaitez, une bannière.</DialogDescription></DialogHeader><div className="grid gap-4"><label className="flex items-center justify-between rounded-xl border border-white/8 p-3 text-sm"><span>Couleur de la carte</span><input type="color" value={customColor} className="h-9 w-14 cursor-pointer rounded border-0 bg-transparent" onChange={(event) => setCustomColor(event.target.value)} /></label><label className="grid gap-2 text-xs text-[#aaa4b4]">Bannière<input type="file" accept="image/*" className="block w-full rounded-xl border border-white/8 bg-black/20 p-3 text-sm" onChange={(event) => { setCustomBanner(event.target.files?.[0] ?? null); setRemoveBanner(false); }} /></label>{customizing?.bannerMediaId && <Button variant="ghost" className={removeBanner ? "text-[#ff8a95]" : ""} onClick={() => { setRemoveBanner((value) => !value); setCustomBanner(null); }}>{removeBanner ? "La bannière sera retirée" : "Retirer la bannière actuelle"}</Button>}</div><DialogFooter><DialogClose asChild><Button variant="ghost">Annuler</Button></DialogClose><Button className="bg-[#ef4f5f] text-white" onClick={() => { if (customizing) void onCustomize?.(customizing, customColor, customBanner, removeBanner); setCustomizing(null); }}>Enregistrer</Button></DialogFooter></DialogContent></Dialog>
     </div>
   );
 }

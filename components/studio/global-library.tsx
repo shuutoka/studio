@@ -87,7 +87,7 @@ export function GlobalLibrary({
                 className="group overflow-hidden rounded-2xl border border-white/8 bg-[#131218] text-left transition hover:-translate-y-0.5 hover:border-white/15"
                 onClick={() => onOpenCharacter(project, character)}
               >
-                <MediaPreview mediaId={character.imageIds[0]} alt={character.name} className="aspect-[4/3] w-full rounded-none" />
+                <MediaPreview mediaId={character.thumbnailImageId ?? character.imageIds[0]} alt={character.name} className="aspect-[4/3] w-full rounded-none" />
                 <div className="p-4">
                   <p className="text-[10px] font-semibold uppercase tracking-[.12em] text-[#ef6977]">{project.name}</p>
                   <div className="mt-2 flex items-start gap-2">

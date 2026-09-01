@@ -2,10 +2,13 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import {
+  ArrowLeft,
+  ArrowRight,
   Link2,
   Plus,
   Search,
   Shirt,
+  Star,
   Tags,
   Trash2,
   Upload,
@@ -109,7 +112,20 @@ export function CharacterManager({
     const ids = await uploadMedia(files, "character-image");
     updateProject((draft) => {
       const target = draft.characters.find((character) => character.id === selected.id);
-      if (target) target.imageIds.push(...ids);
+      if (target) {
+        target.imageIds.push(...ids);
+        target.thumbnailImageId ??= ids[0] ?? null;
+      }
+    });
+  }
+
+  function moveCharacterImage(mediaId: string, direction: -1 | 1) {
+    if (!selected) return;
+    editCharacter(updateProject, selected.id, (character) => {
+      const index = character.imageIds.indexOf(mediaId);
+      const targetIndex = index + direction;
+      if (index < 0 || targetIndex < 0 || targetIndex >= character.imageIds.length) return;
+      [character.imageIds[index], character.imageIds[targetIndex]] = [character.imageIds[targetIndex], character.imageIds[index]];
     });
   }
 
@@ -172,7 +188,7 @@ export function CharacterManager({
                     onClick={() => onSelectCharacter(character.id)}
                   >
                     <MediaPreview
-                      mediaId={character.imageIds[0]}
+                      mediaId={character.thumbnailImageId ?? character.imageIds[0]}
                       alt={character.name}
                       className="size-12 shrink-0 rounded-xl"
                     />
@@ -198,7 +214,7 @@ export function CharacterManager({
             {selected && (
               <section className="min-w-0 rounded-2xl border border-white/8 bg-[#131218] p-5 sm:p-7">
                 <div className="mb-6 flex flex-col gap-4 border-b border-white/7 pb-6 sm:flex-row sm:items-center">
-                  <MediaPreview mediaId={selected.imageIds[0]} alt={selected.name} className="size-20 shrink-0 rounded-2xl" expandable />
+                  <MediaPreview mediaId={selected.thumbnailImageId ?? selected.imageIds[0]} alt={selected.name} className="size-20 shrink-0 rounded-2xl" expandable gallery={selected.imageIds.map((id, index) => ({ id, alt: `${selected.name} ${index + 1}` }))} />
                   <div className="min-w-0 flex-1">
                     <p className="text-xs uppercase tracking-[.15em] text-[#77717f]">Fiche personnage</p>
                     <h2 className="mt-1 truncate text-xl font-semibold text-white">{selected.name}</h2>
@@ -259,7 +275,7 @@ export function CharacterManager({
                     <div className="mb-4 flex items-center justify-between gap-3">
                       <div>
                         <h3 className="font-medium text-white">Images du personnage</h3>
-                        <p className="mt-1 text-xs text-[#77717f]">La première image sert de portrait principal.</p>
+                        <p className="mt-1 text-xs text-[#77717f]">Réorganisez les images et choisissez le portrait principal avec l’étoile.</p>
                       </div>
                       <UploadLabel onFiles={addCharacterImages} multiple />
                     </div>
@@ -267,8 +283,9 @@ export function CharacterManager({
                       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                         {selected.imageIds.map((mediaId, index) => (
                           <div key={mediaId} className="group relative overflow-hidden rounded-xl border border-white/8">
-                            <MediaPreview mediaId={mediaId} alt={`${selected.name} ${index + 1}`} className="aspect-[3/4] w-full" expandable />
-                            {index === 0 && <span className="absolute top-2 left-2 rounded-full bg-black/60 px-2 py-1 text-[9px] text-white">Portrait</span>}
+                            <MediaPreview mediaId={mediaId} alt={`${selected.name} ${index + 1}`} className="aspect-[3/4] w-full" expandable gallery={selected.imageIds.map((id, galleryIndex) => ({ id, alt: `${selected.name} ${galleryIndex + 1}` }))} />
+                            <div className="absolute bottom-2 left-2 flex gap-1 rounded-lg bg-black/60 p-1 opacity-0 transition group-hover:opacity-100"><Button aria-label="Déplacer l’image vers la gauche" title="Déplacer vers la gauche" variant="ghost" size="icon-xs" disabled={index === 0} onClick={() => moveCharacterImage(mediaId, -1)}><ArrowLeft /></Button><Button aria-label="Déplacer l’image vers la droite" title="Déplacer vers la droite" variant="ghost" size="icon-xs" disabled={index === selected.imageIds.length - 1} onClick={() => moveCharacterImage(mediaId, 1)}><ArrowRight /></Button></div>
+                            <Button aria-label="Choisir comme portrait principal" title="Choisir comme portrait principal" variant="ghost" size="icon-xs" className={`absolute left-2 top-2 ${selected.thumbnailImageId === mediaId ? "bg-[#ef4f5f] text-white" : "bg-black/60 text-white opacity-0 group-hover:opacity-100"}`} onClick={() => editCharacter(updateProject, selected.id, (character) => { character.thumbnailImageId = mediaId; })}><Star className={selected.thumbnailImageId === mediaId ? "fill-current" : ""} /></Button>
                             <Button
                               aria-label="Supprimer l’image"
                               variant="destructive"
@@ -277,6 +294,7 @@ export function CharacterManager({
                               onClick={() => {
                                 editCharacter(updateProject, selected.id, (character) => {
                                   character.imageIds = character.imageIds.filter((id) => id !== mediaId);
+                                  if (character.thumbnailImageId === mediaId) character.thumbnailImageId = character.imageIds[0] ?? null;
                                 });
                                 removeMedia(mediaId).catch(() => undefined);
                               }}
@@ -350,7 +368,7 @@ export function CharacterManager({
                             <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
                               {outfit.imageIds.map((mediaId) => (
                                 <div key={mediaId} className="group relative shrink-0">
-                                  <MediaPreview mediaId={mediaId} alt={outfit.name} className="h-28 w-20 rounded-lg" expandable />
+                                  <MediaPreview mediaId={mediaId} alt={outfit.name} className="h-28 w-20 rounded-lg" expandable gallery={outfit.imageIds.map((id, index) => ({ id, alt: `${outfit.name} ${index + 1}` }))} />
                                   <Button
                                     aria-label="Supprimer l’image de tenue"
                                     variant="destructive"

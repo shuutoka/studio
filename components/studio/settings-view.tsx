@@ -3,6 +3,8 @@
 import { useRef, useState } from "react";
 import {
   Accessibility,
+  CloudDownload,
+  CloudUpload,
   Download,
   ExternalLink,
   FileArchive,
@@ -42,11 +44,17 @@ export function SettingsView({
   updateSettings,
   onUploadFont,
   onRemoveFont,
+  onSaveDrive,
+  onLoadDrive,
+  driveBusy = false,
 }: {
   settings: StudioSettings;
   updateSettings: (mutate: (draft: StudioSettings) => void) => void;
   onUploadFont: (file: File) => Promise<void>;
   onRemoveFont: (fontId: string) => Promise<void>;
+  onSaveDrive?: () => Promise<void>;
+  onLoadDrive?: () => Promise<void>;
+  driveBusy?: boolean;
 }) {
   const [section, setSection] = useState<SettingsSection>("backup");
   const [allColor, setAllColor] = useState(settings.paperBackground);
@@ -134,8 +142,13 @@ export function SettingsView({
                   <Field label="Raccourci de sauvegarde" className="sm:col-span-2">
                     <ShortcutRecorder value={settings.shortcuts.save} onChange={(value) => updateSettings((draft) => { draft.shortcuts.save = value; })} />
                   </Field>
+                  <Field label="Google Drive — identifiant client OAuth" className="sm:col-span-2">
+                    <Input value={settings.googleDriveClientId} placeholder="000000000000-….apps.googleusercontent.com" className="border-white/10 bg-black/20" onChange={(event) => updateSettings((draft) => { draft.googleDriveClientId = event.target.value; })} />
+                  </Field>
+                  <div className="flex flex-wrap gap-2 sm:col-span-2"><Button className="bg-[#ef4f5f] text-white" disabled={driveBusy || !settings.googleDriveClientId.trim()} onClick={() => void onSaveDrive?.()}><CloudUpload /> Sauvegarder sur Drive</Button><Button variant="outline" className="border-white/10 bg-transparent" disabled={driveBusy || !settings.googleDriveClientId.trim()} onClick={() => void onLoadDrive?.()}><CloudDownload /> Charger depuis Drive</Button></div>
                 </div>
                 <InfoBox icon={Download}>Le format .efs est une archive ZIP non compressée avec une extension propre à Enfer Fatal Studio.</InfoBox>
+                <InfoBox icon={Globe2}>Créez un identifiant OAuth « Application Web » dans Google Cloud, activez l’API Google Drive et ajoutez l’adresse du Studio aux origines JavaScript autorisées. Le Studio demande uniquement l’accès aux fichiers qu’il crée ou que vous ouvrez.</InfoBox>
               </SettingsPanel>
             )}
 

@@ -2,7 +2,7 @@
 
 Prototype d’un studio d’écriture local-first conçu pour GitHub Pages. Les projets
 sont conservés dans le navigateur et peuvent être sauvegardés dans une archive
-lisible `.efstudio.zip`.
+globale `.efs` ou `.zip`.
 
 ## Fonctions disponibles
 
@@ -12,9 +12,10 @@ lisible `.efstudio.zip`.
 - simulation des formats A4, A5, poche, roman standard et grand format ;
 - éditeur enrichi : titres, polices, tailles, gras, italique, souligné, couleur et listes ;
 - ajout de polices personnalisées TTF, OTF, WOFF et WOFF2 ;
-- fiches de personnages avancées avec recherche, tags, images, tenues et relations ;
-- arbres narratifs sur canevas quadrillé avec boîtes texte, images, personnages, groupes et connexions ;
-- diagrammes de relations dont les bulles grandissent selon le nombre de liens ;
+- fiches de personnages avancées avec recherche, tags, images réordonnables, portrait principal, tenues et relations ;
+- images importées optimisées en WebP, carrousel et visionneuse en grille, liste, image ou texte ;
+- arbres narratifs sur canevas quadrillé avec huit points d’ancrage par boîte ;
+- diagrammes de relations dont les bulles grandissent selon le nombre de liens et se connectent en deux clics ;
 - gestion des tableaux : dossiers, ordre, duplication, apparence, bannière et historique restaurable ;
 - bibliothèque générale des personnages de tous les projets ;
 - objectifs en colonnes « À faire / En cours / Terminé » ;
@@ -24,14 +25,16 @@ lisible `.efstudio.zip`.
 - état `Enregistré` / `Non enregistré` ;
 - avertissement du navigateur avant de quitter avec des changements non sauvegardés ;
 - sauvegarde globale de tous les projets dans un fichier `.efs` non compressé ou `.zip` ;
+- sauvegarde et chargement `.efs` sur Google Drive avec accès limité aux fichiers du Studio ;
 - écran d’ouverture proposant un fichier du PC, un espace vide ou la copie locale de secours ;
 - bouton et état de sauvegarde toujours visibles, avec raccourci configurable ;
 - paramètres inclus dans la sauvegarde : format, nom, thèmes, zoom, sons et raccourcis ;
 - gestion globale des polices intégrées et personnalisées ;
-- visionneuse filtrable de toutes les images, avec agrandissement ;
+- cartes projet personnalisables par couleur et bannière ;
 - mode focus pour l’écriture, défilement natif fluide, fonds personnalisables et pieds de page ;
 - caractères spéciaux, guillemets et raccourcis d’écriture personnalisables ;
 - export d’un manuscrit en DOC, DOCX, ODT, PDF, HTML ou TXT ;
+- import d’un manuscrit DOCX, ODT, TXT ou HTML dans un nouveau volume ;
 - fonctionnement hors ligne progressif grâce au service worker.
 
 La copie IndexedDB sert uniquement à récupérer le travail sur le même appareil.

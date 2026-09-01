@@ -4,7 +4,7 @@ import {
   useMemo, useRef, useState, type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
-  ArrowDown, ArrowUp, BoxSelect, Cable, ChevronDown, CirclePlus, Copy, Edit3,
+  ArrowDown, ArrowLeft, ArrowUp, BoxSelect, Cable, ChevronDown, CirclePlus, Copy, Edit3,
   FileImage, FolderPlus, GitFork, Grip, History, ImagePlus, LayoutGrid,
   ListTree, Moon, MousePointer2, Network, Plus, Redo2, Settings2, Sun, Trash2,
   Undo2, Users, Wrench,
@@ -25,7 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  createEmptyBoard, createId, type BoardNodeKind, type BoardTheme, type BoardType,
+  createEmptyBoard, createId, type BoardAnchor, type BoardNodeKind, type BoardTheme, type BoardType,
   type StudioBoard, type StudioBoardEdge, type StudioBoardNode, type StudioBoardSnapshot,
   type StudioMedia, type StudioProject,
 } from "@/lib/studio";
@@ -35,6 +35,30 @@ type CreateDialogState = { mode: "create" | "duplicate"; type: BoardType } | nul
 
 const canvasWidth = 2400;
 const canvasHeight = 1600;
+const treeAnchors: BoardAnchor[] = ["top-left", "top", "top-right", "right", "bottom-right", "bottom", "bottom-left", "left"];
+
+function anchorPosition(position: { x: number; y: number }, size: { width: number; height: number }, anchor: BoardAnchor) {
+  const horizontal = anchor.includes("left") ? 0 : anchor.includes("right") ? size.width : size.width / 2;
+  const vertical = anchor.includes("top") ? 0 : anchor.includes("bottom") ? size.height : size.height / 2;
+  return { x: position.x + horizontal, y: position.y + vertical };
+}
+
+function relationshipEndpoints(
+  sourcePosition: { x: number; y: number }, sourceSize: { width: number; height: number },
+  targetPosition: { x: number; y: number }, targetSize: { width: number; height: number },
+) {
+  const sourceCenter = { x: sourcePosition.x + sourceSize.width / 2, y: sourcePosition.y + sourceSize.height / 2 };
+  const targetCenter = { x: targetPosition.x + targetSize.width / 2, y: targetPosition.y + targetSize.height / 2 };
+  const deltaX = targetCenter.x - sourceCenter.x;
+  const deltaY = targetCenter.y - sourceCenter.y;
+  const distance = Math.max(1, Math.hypot(deltaX, deltaY));
+  const unitX = deltaX / distance;
+  const unitY = deltaY / distance;
+  return {
+    source: { x: sourceCenter.x + unitX * sourceSize.width / 2, y: sourceCenter.y + unitY * sourceSize.height / 2 },
+    target: { x: targetCenter.x - unitX * targetSize.width / 2, y: targetCenter.y - unitY * targetSize.height / 2 },
+  };
+}
 
 function snapshotBoard(board: StudioBoard): StudioBoardSnapshot {
   return structuredClone({
@@ -97,11 +121,11 @@ export function BoardsWorkspace({
     () => [...project.boards].sort((a, b) => a.order - b.order),
     [project.boards],
   );
-  const [activeBoardId, setActiveBoardId] = useState<string | null>(orderedBoards[0]?.id ?? null);
+  const [activeBoardId, setActiveBoardId] = useState<string | null>(null);
   const [tool, setTool] = useState<BoardTool>("select");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
-  const [connectionSource, setConnectionSource] = useState<string | null>(null);
+  const [connectionSource, setConnectionSource] = useState<{ nodeId: string; anchor: BoardAnchor } | null>(null);
   const [undoStack, setUndoStack] = useState<StudioBoardSnapshot[]>([]);
   const [redoStack, setRedoStack] = useState<StudioBoardSnapshot[]>([]);
   const [createDialog, setCreateDialog] = useState<CreateDialogState>(null);
@@ -119,7 +143,7 @@ export function BoardsWorkspace({
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const uploadTargetRef = useRef<"new-image" | "banner" | string>("new-image");
 
-  const board = project.boards.find((candidate) => candidate.id === activeBoardId) ?? orderedBoards[0] ?? null;
+  const board = project.boards.find((candidate) => candidate.id === activeBoardId) ?? null;
   const selectedNode = board?.nodes.find((node) => node.id === selectedNodeId) ?? null;
   const selectedEdge = board?.edges.find((edge) => edge.id === selectedEdgeId) ?? null;
 
@@ -204,12 +228,11 @@ export function BoardsWorkspace({
 
   function confirmDeleteBoard() {
     if (!board || deleteConfirmation !== board.name) return;
-    const next = orderedBoards.find((candidate) => candidate.id !== board.id);
     updateProject((draft) => {
       draft.boards = draft.boards.filter((candidate) => candidate.id !== board.id);
       draft.boards.forEach((candidate, index) => { candidate.order = index; });
     });
-    selectBoard(next?.id ?? null);
+    selectBoard(null);
     setDeleteDialogOpen(false);
     setDeleteConfirmation("");
     toast.success("Tableau supprimé.");
@@ -261,23 +284,24 @@ export function BoardsWorkspace({
     setSelectedNodeId(null);
   }
 
-  function handlePort(nodeId: string) {
+  function handlePort(nodeId: string, anchor: BoardAnchor = "right") {
     if (!board) return;
     if (!connectionSource) {
-      setConnectionSource(nodeId);
+      setConnectionSource({ nodeId, anchor });
       setTool("connect");
-      toast.message("Cliquez sur un port de la boîte à relier.");
+      toast.message(board.type === "relationship" ? "Cliquez sur le second personnage." : "Cliquez sur un point d’ancrage de la boîte à relier.");
       return;
     }
-    if (connectionSource === nodeId) {
+    if (connectionSource.nodeId === nodeId) {
       setConnectionSource(null);
       return;
     }
     const duplicate = board.edges.some((edge) =>
-      (edge.sourceId === connectionSource && edge.targetId === nodeId) ||
-      (edge.sourceId === nodeId && edge.targetId === connectionSource));
+      (edge.sourceId === connectionSource.nodeId && edge.targetId === nodeId) ||
+      (edge.sourceId === nodeId && edge.targetId === connectionSource.nodeId));
     if (!duplicate) commit("Connexion ajoutée", (draft) => draft.edges.push({
-      id: createId("board-edge"), sourceId: connectionSource, targetId: nodeId,
+      id: createId("board-edge"), sourceId: connectionSource.nodeId, targetId: nodeId,
+      sourceAnchor: connectionSource.anchor, targetAnchor: anchor,
       label: board.type === "relationship" ? "Relation" : "", color: "#ef6977",
     }));
     setConnectionSource(null);
@@ -286,6 +310,7 @@ export function BoardsWorkspace({
 
   function beginNodeDrag(event: ReactPointerEvent<HTMLDivElement>, node: StudioBoardNode) {
     if (tool === "delete") { removeNode(node.id); return; }
+    if (tool === "connect" && board?.type === "relationship") { handlePort(node.id); return; }
     setSelectedNodeId(node.id);
     setSelectedEdgeId(null);
     if (tool !== "select") return;
@@ -358,7 +383,7 @@ export function BoardsWorkspace({
   }
 
   if (!board) return <div className="flex min-h-0 flex-1 flex-col bg-[#0c0b0f]">
-    <EmptyBoards onCreate={beginCreate} />
+    <EmptyBoards project={project} onCreate={beginCreate} onOpen={selectBoard} />
     <CreateBoardDialog state={createDialog} name={createName} onNameChange={setCreateName} onClose={() => setCreateDialog(null)} onConfirm={confirmCreate} />
   </div>;
 
@@ -372,6 +397,7 @@ export function BoardsWorkspace({
       <div className="shrink-0 border-b border-white/8 bg-[#121117]">
         {board.bannerMediaId && <div className="relative h-16 overflow-hidden border-b border-white/7"><MediaPreview mediaId={board.bannerMediaId} alt={`Bannière de ${board.name}`} className="h-full w-full opacity-55" /><div className="absolute inset-0 bg-gradient-to-r from-[#121117] via-[#121117]/45 to-[#121117]" /></div>}
         <div className="flex min-h-14 flex-wrap items-center gap-2 px-3 py-2 sm:px-5">
+          <Button size="icon-sm" variant="ghost" aria-label="Accueil des tableaux" title="Accueil des tableaux" onClick={() => selectBoard(null)}><ArrowLeft /></Button>
           <Select value={board.id} onValueChange={selectBoard}>
             <SelectTrigger aria-label="Tableau actif" className="w-[min(72vw,260px)] border-white/10 bg-white/4"><SelectValue /></SelectTrigger>
             <SelectContent>{orderedBoards.map((item) => <SelectItem key={item.id} value={item.id}>{item.type === "tree" ? "Arbre" : "Diagramme"} · {item.name}</SelectItem>)}</SelectContent>
@@ -383,7 +409,7 @@ export function BoardsWorkspace({
             <ToolbarButton label="Rétablir" disabled={!redoStack.length} onClick={redo}><Redo2 /></ToolbarButton>
             <ToolbarButton label="Historique" onClick={() => setHistoryOpen(true)}><History /></ToolbarButton>
             <DropdownMenu>
-              <DropdownMenuTrigger asChild><Button size="sm" className="bg-[#ef4f5f] text-white hover:bg-[#ff6675]"><Plus /> Ajouter <ChevronDown /></Button></DropdownMenuTrigger>
+              <DropdownMenuTrigger asChild><Button size="sm" className="bg-[#ef4f5f] text-white hover:bg-[#ff6675]"><Plus /> Nouveau <ChevronDown /></Button></DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 {board.type === "tree" ? <>
                   <DropdownMenuItem onSelect={() => addNode("text")}><BoxSelect /> Boîte texte</DropdownMenuItem>
@@ -416,6 +442,7 @@ export function BoardsWorkspace({
           <ToolButton active={tool === "pan"} label="Déplacement" onClick={() => setTool("pan")}><Grip /></ToolButton>
           <ToolButton active={tool === "connect"} label="Connexion" onClick={() => { setTool("connect"); setConnectionSource(null); }}><Cable /></ToolButton>
           <ToolButton active={tool === "delete"} label="Suppression" onClick={() => setTool("delete")}><Trash2 /></ToolButton>
+          {board.type === "relationship" && <Button size="sm" variant="ghost" onClick={() => addNode("character")}><Users /> Ajouter un personnage</Button>}
           <span className="mx-1 h-5 w-px shrink-0 bg-white/9" />
           <Button size="sm" variant="ghost" disabled={!selectedNode && !selectedEdge} onClick={() => setEditOpen(true)}><Edit3 /> Modifier</Button>
           <Button size="sm" variant="ghost" disabled={!selectedNode && !selectedEdge} className="text-[#d8868e]" onClick={deleteSelection}><Trash2 /> Supprimer</Button>
@@ -449,12 +476,18 @@ export function BoardsWorkspace({
               const targetSize = nodeSize(board, target);
               const sourcePosition = dragPosition?.nodeId === source.id ? dragPosition : source;
               const targetPosition = dragPosition?.nodeId === target.id ? dragPosition : target;
-              const x1 = sourcePosition.x + sourceSize.width;
-              const y1 = sourcePosition.y + sourceSize.height / 2;
-              const x2 = targetPosition.x;
-              const y2 = targetPosition.y + targetSize.height / 2;
+              const endpoints = board.type === "relationship"
+                ? relationshipEndpoints(sourcePosition, sourceSize, targetPosition, targetSize)
+                : {
+                    source: anchorPosition(sourcePosition, sourceSize, edge.sourceAnchor),
+                    target: anchorPosition(targetPosition, targetSize, edge.targetAnchor),
+                  };
+              const { x: x1, y: y1 } = endpoints.source;
+              const { x: x2, y: y2 } = endpoints.target;
               const curve = Math.max(80, Math.abs(x2 - x1) * 0.42);
-              const path = `M ${x1} ${y1} C ${x1 + curve} ${y1}, ${x2 - curve} ${y2}, ${x2} ${y2}`;
+              const path = board.type === "relationship"
+                ? `M ${x1} ${y1} L ${x2} ${y2}`
+                : `M ${x1} ${y1} C ${x1 + curve} ${y1}, ${x2 - curve} ${y2}, ${x2} ${y2}`;
               const selected = selectedEdgeId === edge.id;
               return <g key={edge.id} className="pointer-events-auto cursor-pointer" onClick={(event) => { event.stopPropagation(); if (tool === "delete") { commit("Connexion supprimée", (draft) => { draft.edges = draft.edges.filter((item) => item.id !== edge.id); }); } else { setSelectedEdgeId(edge.id); setSelectedNodeId(null); } }}>
                 <path d={path} fill="none" stroke="transparent" strokeWidth="18" />
@@ -483,7 +516,7 @@ export function BoardsWorkspace({
               onPointerDown={(event) => beginNodeDrag(event, node)}
               onPointerMove={moveNode}
               onPointerUp={endNodeDrag}
-              onPort={() => handlePort(node.id)}
+              onPort={(anchor) => handlePort(node.id, anchor)}
               onOpenCharacter={onOpenCharacter}
               onAssignCharacter={(characterId) => commit("Personnage assigné", (draft) => {
                 const target = draft.nodes.find((candidate) => candidate.id === node.id);
@@ -534,11 +567,11 @@ function BoardNodeCard({
   selected: boolean;
   tool: BoardTool;
   characters: StudioProject["characters"];
-  connectionSource: string | null;
+  connectionSource: { nodeId: string; anchor: BoardAnchor } | null;
   onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onPointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onPointerUp: (event: ReactPointerEvent<HTMLDivElement>) => void;
-  onPort: () => void;
+  onPort: (anchor: BoardAnchor) => void;
   onOpenCharacter: (characterId: string) => void;
   onAssignCharacter: (characterId: string) => void;
   onAddGroupCharacter: (characterId: string) => void;
@@ -552,19 +585,27 @@ function BoardNodeCard({
   const light = board.theme === "light";
   const relationship = board.type === "relationship";
   return <div
-    className={`absolute flex flex-col border shadow-xl transition-shadow ${relationship ? "overflow-hidden rounded-full" : "rounded-xl"} ${selected ? "border-white ring-2 ring-[#ef4f5f]/70" : "border-black/30"} ${tool === "delete" ? "cursor-crosshair" : "cursor-move"}`}
+    className={`absolute flex flex-col border shadow-xl transition-shadow ${relationship ? "overflow-hidden rounded-full" : "rounded-xl"} ${selected ? "border-white ring-2 ring-[#ef4f5f]/70" : "border-black/30"} ${connectionSource?.nodeId === node.id ? "animate-pulse border-[#ff8a95] ring-4 ring-[#ef4f5f]/35" : ""} ${tool === "connect" && relationship ? "cursor-crosshair" : tool === "delete" ? "cursor-crosshair" : "cursor-move"}`}
     style={{ left: x, top: y, width, height, backgroundColor: relationship ? node.color : board.cardColor, color: light ? "#242129" : "#eeeaf2" }}
     onPointerDown={onPointerDown}
     onPointerMove={onPointerMove}
     onPointerUp={onPointerUp}
     onDoubleClick={(event) => { event.stopPropagation(); if (character) onOpenCharacter(character.id); }}
   >
-    <button type="button" aria-label="Port gauche" title="Relier cette boîte" className={`absolute left-0 top-1/2 z-20 size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-[#ef4f5f] shadow ${connectionSource === node.id ? "ring-4 ring-[#ef4f5f]/35" : ""}`} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onPort(); }} />
-    <button type="button" aria-label="Port droit" title="Relier cette boîte" className={`absolute right-0 top-1/2 z-20 size-4 translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-[#ef4f5f] shadow ${connectionSource === node.id ? "ring-4 ring-[#ef4f5f]/35" : ""}`} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onPort(); }} />
+    {!relationship && treeAnchors.map((anchor) => <button
+      key={anchor}
+      type="button"
+      aria-label={`Point d’ancrage ${anchor}`}
+      title="Relier cette boîte"
+      className={`absolute z-20 size-4 rounded-full border-2 border-white bg-[#ef4f5f] shadow ${connectionSource?.nodeId === node.id && connectionSource.anchor === anchor ? "ring-4 ring-[#ef4f5f]/35" : ""}`}
+      style={anchorButtonStyle(anchor)}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => { event.stopPropagation(); onPort(anchor); }}
+    />)}
 
     {node.kind === "character" ? character ? <div className={`flex size-full ${relationship ? "flex-col items-center justify-center p-4 text-center" : "items-center gap-3 p-4"}`}>
-      <MediaPreview mediaId={character.imageIds[0]} alt={character.name} className={relationship ? "mb-2 size-[48%] min-h-12 min-w-12 rounded-full" : "size-16 shrink-0 rounded-xl"} />
-      <div className="min-w-0"><p className="truncate font-semibold">{character.name}</p>{character.role && <p className="mt-1 line-clamp-2 text-[11px] opacity-65">{character.role}</p>}<p className="mt-1 text-[10px] opacity-50">Double-cliquez pour ouvrir</p></div>
+      <MediaPreview mediaId={character.thumbnailImageId ?? character.imageIds[0]} alt={character.name} className={relationship ? "mb-2 size-[48%] min-h-12 min-w-12 rounded-full" : "size-16 shrink-0 rounded-xl"} />
+      <div className="min-w-0"><p className="truncate font-semibold">{character.name}</p>{character.role && <p className="mt-1 line-clamp-2 text-[11px] opacity-65">{character.role}</p>}<p className="mt-1 line-clamp-2 text-[10px] opacity-50">{node.text.trim() || "Double-cliquez pour ouvrir"}</p></div>
     </div> : <CharacterPicker characters={characters} onSelect={onAssignCharacter} compact={relationship} /> : node.kind === "image" ? <div className="relative flex size-full flex-col overflow-hidden rounded-[inherit]">
       <MediaPreview mediaId={node.imageId} alt={node.title} className="min-h-0 flex-1 w-full" expandable />
       <button type="button" className="shrink-0 bg-black/35 px-3 py-2 text-left text-xs text-white hover:bg-black/50" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onUploadImage(); }}>{node.imageId ? "Remplacer l’image" : "Ajouter une image"}</button>
@@ -574,7 +615,7 @@ function BoardNodeCard({
       <div className="flex min-h-14 items-center gap-2 overflow-x-auto rounded-lg border border-white/8 bg-black/10 p-2">
         {node.imageId && <MediaPreview mediaId={node.imageId} alt={node.title} className="h-12 w-16 shrink-0 rounded-md" expandable />}
         <Button size="icon-xs" variant="ghost" title="Ajouter une image" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onUploadImage(); }}><ImagePlus /></Button>
-        {node.characterIds.map((id) => { const item = characters.find((candidate) => candidate.id === id); return item ? <button key={id} type="button" className="group relative shrink-0" title={`Retirer ${item.name}`} onPointerDown={(event) => event.stopPropagation()} onDoubleClick={(event) => { event.stopPropagation(); onOpenCharacter(id); }} onClick={(event) => { if (event.altKey) onRemoveGroupCharacter(id); }}><MediaPreview mediaId={item.imageIds[0]} alt={item.name} className="size-10 rounded-full" /><span className="mt-0.5 block max-w-14 truncate text-[9px]">{item.name}</span></button> : null; })}
+        {node.characterIds.map((id) => { const item = characters.find((candidate) => candidate.id === id); return item ? <button key={id} type="button" className="group relative shrink-0" title={`Retirer ${item.name}`} onPointerDown={(event) => event.stopPropagation()} onDoubleClick={(event) => { event.stopPropagation(); onOpenCharacter(id); }} onClick={(event) => { if (event.altKey) onRemoveGroupCharacter(id); }}><MediaPreview mediaId={item.thumbnailImageId ?? item.imageIds[0]} alt={item.name} className="size-10 rounded-full" /><span className="mt-0.5 block max-w-14 truncate text-[9px]">{item.name}</span></button> : null; })}
         <CharacterPicker characters={characters.filter((character) => !node.characterIds.includes(character.id))} onSelect={onAddGroupCharacter} mini />
       </div>
     </div> : <div className="flex size-full flex-col p-4">
@@ -582,6 +623,20 @@ function BoardNodeCard({
       <Textarea value={text} placeholder="Décrivez cet évènement…" className="min-h-0 flex-1 resize-none border-0 bg-transparent px-0 text-sm leading-5 shadow-none focus-visible:ring-0" onPointerDown={(event) => event.stopPropagation()} onChange={(event) => setText(event.target.value)} onBlur={() => onChangeText(title, text)} />
     </div>}
   </div>;
+}
+
+function anchorButtonStyle(anchor: BoardAnchor): React.CSSProperties {
+  const positions: Record<BoardAnchor, React.CSSProperties> = {
+    left: { left: 0, top: "50%", transform: "translate(-50%, -50%)" },
+    right: { right: 0, top: "50%", transform: "translate(50%, -50%)" },
+    top: { left: "50%", top: 0, transform: "translate(-50%, -50%)" },
+    bottom: { left: "50%", bottom: 0, transform: "translate(-50%, 50%)" },
+    "top-left": { left: 0, top: 0, transform: "translate(-50%, -50%)" },
+    "top-right": { right: 0, top: 0, transform: "translate(50%, -50%)" },
+    "bottom-left": { left: 0, bottom: 0, transform: "translate(-50%, 50%)" },
+    "bottom-right": { right: 0, bottom: 0, transform: "translate(50%, 50%)" },
+  };
+  return positions[anchor];
 }
 
 function CharacterPicker({ characters, onSelect, compact = false, mini = false }: { characters: StudioProject["characters"]; onSelect: (id: string) => void; compact?: boolean; mini?: boolean }) {
@@ -593,14 +648,24 @@ function CharacterPicker({ characters, onSelect, compact = false, mini = false }
     <p className="mb-2 text-center text-[11px] font-medium opacity-65">Choisir un personnage</p>
     <Input autoFocus={mini} value={search} placeholder="Rechercher…" className="h-8 border-white/10 bg-black/15 text-xs" onChange={(event) => setSearch(event.target.value)} />
     <div className={`${mini ? "absolute z-30 mt-20 max-h-40 w-48 rounded-lg border border-white/10 bg-[#1b1821] p-1 shadow-2xl" : "mt-2 max-h-24"} overflow-y-auto`}>
-      {suggestions.map((character) => <button key={character.id} type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-white/8" onClick={() => { onSelect(character.id); setOpen(false); }}><MediaPreview mediaId={character.imageIds[0]} alt={character.name} className="size-6 shrink-0 rounded-md" /><span className="truncate">{character.name}</span></button>)}
+      {suggestions.map((character) => <button key={character.id} type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-white/8" onClick={() => { onSelect(character.id); setOpen(false); }}><MediaPreview mediaId={character.thumbnailImageId ?? character.imageIds[0]} alt={character.name} className="size-6 shrink-0 rounded-md" /><span className="truncate">{character.name}</span></button>)}
       {!suggestions.length && <p className="p-2 text-center text-[10px] opacity-50">Aucun personnage</p>}
     </div>
   </div>;
 }
 
-function EmptyBoards({ onCreate }: { onCreate: (type: BoardType) => void }) {
-  return <div className="studio-page grid min-h-0 flex-1 place-items-center overflow-y-auto p-6"><div className="max-w-2xl text-center"><span className="mx-auto grid size-16 place-items-center rounded-2xl bg-[#ef4f5f]/10 text-[#ef6977]"><GitFork className="size-7" /></span><h1 className="mt-5 text-2xl font-bold text-white">Visualisez votre histoire</h1><p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-[#8f8996]">Créez un arbre pour organiser une temporalité et des évènements, ou un diagramme pour cartographier les relations entre personnages.</p><div className="mt-7 grid gap-3 sm:grid-cols-2"><article className="flex flex-col rounded-2xl border border-white/9 bg-[#15131a] p-5 text-left"><ListTree className="mb-3 size-5 text-[#ef6977]" /><span className="block font-semibold text-white">Arbre narratif</span><span className="mt-1 flex-1 text-xs leading-5 text-[#77717f]">Boîtes texte, images, personnages et groupes reliés.</span><Button className="mt-5 w-full bg-[#ef4f5f] text-white hover:bg-[#ff6675]" onClick={() => onCreate("tree")}><Plus /> Créer un arbre</Button></article><article className="flex flex-col rounded-2xl border border-white/9 bg-[#15131a] p-5 text-left"><Network className="mb-3 size-5 text-[#ef6977]" /><span className="block font-semibold text-white">Diagramme de relations</span><span className="mt-1 flex-1 text-xs leading-5 text-[#77717f]">Bulles de personnages dimensionnées par leurs relations.</span><Button className="mt-5 w-full bg-[#ef4f5f] text-white hover:bg-[#ff6675]" onClick={() => onCreate("relationship")}><Plus /> Créer un diagramme</Button></article></div></div></div>;
+function EmptyBoards({ project, onCreate, onOpen }: { project: StudioProject; onCreate: (type: BoardType) => void; onOpen: (id: string) => void }) {
+  const folders = [...project.boardFolders].sort((a, b) => a.order - b.order);
+  const unfiled = project.boards.filter((board) => !board.folderId).sort((a, b) => a.order - b.order);
+  const sections = [
+    ...(unfiled.length ? [{ id: "unfiled", name: "Tableaux", boards: unfiled }] : []),
+    ...folders.map((folder) => ({
+      id: folder.id,
+      name: folder.name,
+      boards: project.boards.filter((board) => board.folderId === folder.id).sort((a, b) => a.order - b.order),
+    })).filter((section) => section.boards.length),
+  ];
+  return <div className="studio-page min-h-0 flex-1 overflow-y-auto p-5 sm:p-8"><div className="mx-auto max-w-6xl"><div className="text-center"><span className="mx-auto grid size-16 place-items-center rounded-2xl bg-[#ef4f5f]/10 text-[#ef6977]"><GitFork className="size-7" /></span><h1 className="mt-5 text-2xl font-bold text-white">Visualisez votre histoire</h1><p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-[#8f8996]">Créez un arbre pour organiser une temporalité et des évènements, ou un diagramme pour cartographier les relations entre personnages.</p></div><div className="mx-auto mt-7 grid max-w-2xl gap-3 sm:grid-cols-2"><article className="flex flex-col rounded-2xl border border-white/9 bg-[#15131a] p-5 text-left"><ListTree className="mb-3 size-5 text-[#ef6977]" /><span className="block font-semibold text-white">Arbre narratif</span><span className="mt-1 flex-1 text-xs leading-5 text-[#77717f]">Boîtes texte, images, personnages et groupes reliés.</span><Button className="mt-5 w-full bg-[#ef4f5f] text-white hover:bg-[#ff6675]" onClick={() => onCreate("tree")}><Plus /> Créer un arbre</Button></article><article className="flex flex-col rounded-2xl border border-white/9 bg-[#15131a] p-5 text-left"><Network className="mb-3 size-5 text-[#ef6977]" /><span className="block font-semibold text-white">Diagramme de relations</span><span className="mt-1 flex-1 text-xs leading-5 text-[#77717f]">Bulles de personnages dimensionnées par leurs relations.</span><Button className="mt-5 w-full bg-[#ef4f5f] text-white hover:bg-[#ff6675]" onClick={() => onCreate("relationship")}><Plus /> Créer un diagramme</Button></article></div>{sections.length > 0 && <div className="mt-10 space-y-7 text-left">{sections.map((section) => <section key={section.id}><div className="mb-3 flex items-center gap-2"><LayoutGrid className="size-4 text-[#8f8996]" /><h2 className="font-semibold text-white">{section.name}</h2><span className="text-xs text-[#69636f]">{section.boards.length}</span></div><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{section.boards.map((board) => <button key={board.id} type="button" className="group overflow-hidden rounded-2xl border border-white/9 bg-[#15131a] text-left transition hover:-translate-y-0.5 hover:border-[#ef4f5f]/35" onClick={() => onOpen(board.id)}><div className="relative h-24" style={{ backgroundColor: board.cardColor }}>{board.bannerMediaId ? <MediaPreview mediaId={board.bannerMediaId} alt="" className="size-full opacity-75" /> : <span className="grid size-full place-items-center text-white/25">{board.type === "tree" ? <ListTree className="size-9" /> : <Network className="size-9" />}</span>}<span className="absolute left-3 top-3 rounded-full bg-black/45 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-white">{board.type === "tree" ? "Arbre" : "Relations"}</span></div><div className="p-4"><span className="block truncate font-semibold text-white group-hover:text-[#ff8a95]">{board.name}</span><span className="mt-1 line-clamp-2 min-h-8 text-xs leading-4 text-[#77717f]">{board.description || `${board.nodes.length} éléments · ${board.edges.length} liens`}</span></div></button>)}</div></section>)}</div>}</div></div>;
 }
 
 function ToolbarButton({ label, disabled, onClick, children }: { label: string; disabled?: boolean; onClick: () => void; children: React.ReactNode }) {
