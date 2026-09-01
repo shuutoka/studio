@@ -253,3 +253,34 @@ test("wires manuscript import, Drive backups, WebP media and project card custom
   assert.match(characters, /moveCharacterImage/);
   assert.match(home, /Personnaliser la carte projet/);
 });
+
+test("ships the Pansement writing, Drive, feedback and image-link fixes", async () => {
+  const { createDefaultSettings, normalizeSettings, PAGE_FORMATS } = await vite.ssrLoadModule("/lib/studio.ts");
+  const writingImport = await readFile(path.join(root, "lib/writing-import.ts"), "utf8");
+  const importButton = await readFile(path.join(root, "components/studio/writing-import-button.tsx"), "utf8");
+  const editor = await readFile(path.join(root, "components/studio/rich-text-editor.tsx"), "utf8");
+  const drive = await readFile(path.join(root, "lib/google-drive.ts"), "utf8");
+  const app = await readFile(path.join(root, "components/studio/studio-app-v3.tsx"), "utf8");
+  const settingsView = await readFile(path.join(root, "components/studio/settings-view.tsx"), "utf8");
+  const feedback = await readFile(path.join(root, "lib/feedback.ts"), "utf8");
+  const mediaPreview = await readFile(path.join(root, "components/studio/media-preview.tsx"), "utf8");
+
+  assert.deepEqual([PAGE_FORMATS.a4.width, PAGE_FORMATS.a4.height], [794, 1123]);
+  const settings = createDefaultSettings();
+  settings.googleDriveApiKey = "picker-key";
+  settings.googleDriveAppId = "123456";
+  assert.equal(normalizeSettings(settings).googleDriveApiKey, "picker-key");
+  assert.equal(normalizeSettings(settings).googleDriveAppId, "123456");
+  assert.match(writingImport, /background-color/);
+  assert.match(writingImport, /removeImportedFormatting/);
+  assert.match(importButton, /Supprimer la mise en forme/);
+  assert.match(importButton, /Format des pages/);
+  assert.match(editor, /selectWholeDocument/);
+  assert.match(drive, /PickerBuilder/);
+  assert.match(drive, /setDeveloperKey/);
+  assert.match(app, /Charger depuis Google Drive/);
+  assert.match(settingsView, /Feedback/);
+  assert.match(feedback, /formsubmit\.co\/ajax\/ggchoutca@gmail\.com/);
+  assert.match(mediaPreview, /Ajouter à une galerie/);
+  assert.match(mediaPreview, /Déjà ajoutée à/);
+});

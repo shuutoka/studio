@@ -15,7 +15,7 @@ import {
   UserRoundPlus,
 } from "lucide-react";
 
-import { MediaPreview } from "@/components/studio/media-preview";
+import { MediaPreview, type MediaCharacterLinking } from "@/components/studio/media-preview";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -80,6 +80,19 @@ export function CharacterManager({
         .includes(query);
     return matchesSearch && (tagFilter === "all" || character.tags.includes(tagFilter));
   });
+  const characterLinking: MediaCharacterLinking = {
+    projectName: project.name,
+    characters: project.characters.map((character) => ({ id: character.id, name: character.name, imageIds: character.imageIds })),
+    onChange: (mediaId, characterId, linked) => editCharacter(updateProject, characterId, (character) => {
+      if (linked) {
+        if (!character.imageIds.includes(mediaId)) character.imageIds.push(mediaId);
+        character.thumbnailImageId ??= mediaId;
+      } else {
+        character.imageIds = character.imageIds.filter((id) => id !== mediaId);
+        if (character.thumbnailImageId === mediaId) character.thumbnailImageId = character.imageIds[0] ?? null;
+      }
+    }),
+  };
 
   function addCharacter() {
     const character = createEmptyCharacter();
@@ -101,7 +114,7 @@ export function CharacterManager({
         );
       });
     });
-    Promise.all(mediaIds.map((id) => removeMedia(id))).catch(() => undefined);
+    Promise.all(mediaIds.filter((id) => !isMediaReferenced(project, id, { characterId: deleteCharacterId, wholeCharacter: true })).map((id) => removeMedia(id))).catch(() => undefined);
     const next = project.characters.find((item) => item.id !== deleteCharacterId);
     if (next) onSelectCharacter(next.id);
     setDeleteCharacterId(null);
@@ -214,7 +227,7 @@ export function CharacterManager({
             {selected && (
               <section className="min-w-0 rounded-2xl border border-white/8 bg-[#131218] p-5 sm:p-7">
                 <div className="mb-6 flex flex-col gap-4 border-b border-white/7 pb-6 sm:flex-row sm:items-center">
-                  <MediaPreview mediaId={selected.thumbnailImageId ?? selected.imageIds[0]} alt={selected.name} className="size-20 shrink-0 rounded-2xl" expandable gallery={selected.imageIds.map((id, index) => ({ id, alt: `${selected.name} ${index + 1}` }))} />
+                  <MediaPreview mediaId={selected.thumbnailImageId ?? selected.imageIds[0]} alt={selected.name} className="size-20 shrink-0 rounded-2xl" expandable gallery={selected.imageIds.map((id, index) => ({ id, alt: `${selected.name} ${index + 1}` }))} characterLinking={characterLinking} />
                   <div className="min-w-0 flex-1">
                     <p className="text-xs uppercase tracking-[.15em] text-[#77717f]">Fiche personnage</p>
                     <h2 className="mt-1 truncate text-xl font-semibold text-white">{selected.name}</h2>
@@ -283,11 +296,11 @@ export function CharacterManager({
                       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                         {selected.imageIds.map((mediaId, index) => (
                           <div key={mediaId} className="group relative overflow-hidden rounded-xl border border-white/8">
-                            <MediaPreview mediaId={mediaId} alt={`${selected.name} ${index + 1}`} className="aspect-[3/4] w-full" expandable gallery={selected.imageIds.map((id, galleryIndex) => ({ id, alt: `${selected.name} ${galleryIndex + 1}` }))} />
+                            <MediaPreview mediaId={mediaId} alt={`${selected.name} ${index + 1}`} className="aspect-[3/4] w-full" expandable gallery={selected.imageIds.map((id, galleryIndex) => ({ id, alt: `${selected.name} ${galleryIndex + 1}` }))} characterLinking={characterLinking} />
                             <div className="absolute bottom-2 left-2 flex gap-1 rounded-lg bg-black/60 p-1 opacity-0 transition group-hover:opacity-100"><Button aria-label="Déplacer l’image vers la gauche" title="Déplacer vers la gauche" variant="ghost" size="icon-xs" disabled={index === 0} onClick={() => moveCharacterImage(mediaId, -1)}><ArrowLeft /></Button><Button aria-label="Déplacer l’image vers la droite" title="Déplacer vers la droite" variant="ghost" size="icon-xs" disabled={index === selected.imageIds.length - 1} onClick={() => moveCharacterImage(mediaId, 1)}><ArrowRight /></Button></div>
                             <Button aria-label="Choisir comme portrait principal" title="Choisir comme portrait principal" variant="ghost" size="icon-xs" className={`absolute left-2 top-2 ${selected.thumbnailImageId === mediaId ? "bg-[#ef4f5f] text-white" : "bg-black/60 text-white opacity-0 group-hover:opacity-100"}`} onClick={() => editCharacter(updateProject, selected.id, (character) => { character.thumbnailImageId = mediaId; })}><Star className={selected.thumbnailImageId === mediaId ? "fill-current" : ""} /></Button>
                             <Button
-                              aria-label="Supprimer l’image"
+                              aria-label="Retirer l’image de la galerie"
                               variant="destructive"
                               size="icon-xs"
                               className="absolute top-2 right-2 opacity-0 transition group-hover:opacity-100"
@@ -296,7 +309,7 @@ export function CharacterManager({
                                   character.imageIds = character.imageIds.filter((id) => id !== mediaId);
                                   if (character.thumbnailImageId === mediaId) character.thumbnailImageId = character.imageIds[0] ?? null;
                                 });
-                                removeMedia(mediaId).catch(() => undefined);
+                                if (!isMediaReferenced(project, mediaId, { characterId: selected.id, gallery: true })) removeMedia(mediaId).catch(() => undefined);
                               }}
                             >
                               <Trash2 />
@@ -346,7 +359,7 @@ export function CharacterManager({
                               size="icon-sm"
                               className="text-[#77717f] hover:text-[#ff7885]"
                               onClick={() => {
-                                outfit.imageIds.forEach((id) => removeMedia(id).catch(() => undefined));
+                                outfit.imageIds.filter((id) => !isMediaReferenced(project, id, { characterId: selected.id, outfitId: outfit.id })).forEach((id) => removeMedia(id).catch(() => undefined));
                                 editCharacter(updateProject, selected.id, (character) => {
                                   character.outfits = character.outfits.filter((item) => item.id !== outfit.id);
                                 });
@@ -368,9 +381,9 @@ export function CharacterManager({
                             <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
                               {outfit.imageIds.map((mediaId) => (
                                 <div key={mediaId} className="group relative shrink-0">
-                                  <MediaPreview mediaId={mediaId} alt={outfit.name} className="h-28 w-20 rounded-lg" expandable gallery={outfit.imageIds.map((id, index) => ({ id, alt: `${outfit.name} ${index + 1}` }))} />
+                                  <MediaPreview mediaId={mediaId} alt={outfit.name} className="h-28 w-20 rounded-lg" expandable gallery={outfit.imageIds.map((id, index) => ({ id, alt: `${outfit.name} ${index + 1}` }))} characterLinking={characterLinking} />
                                   <Button
-                                    aria-label="Supprimer l’image de tenue"
+                                    aria-label="Retirer l’image de la tenue"
                                     variant="destructive"
                                     size="icon-xs"
                                     className="absolute top-1 right-1 opacity-0 group-hover:opacity-100"
@@ -379,7 +392,7 @@ export function CharacterManager({
                                         const target = character.outfits.find((item) => item.id === outfit.id);
                                         if (target) target.imageIds = target.imageIds.filter((id) => id !== mediaId);
                                       });
-                                      removeMedia(mediaId).catch(() => undefined);
+                                      if (!isMediaReferenced(project, mediaId, { characterId: selected.id, outfitId: outfit.id })) removeMedia(mediaId).catch(() => undefined);
                                     }}
                                   >
                                     <Trash2 />
@@ -494,6 +507,17 @@ export function CharacterManager({
       </AlertDialog>
     </div>
   );
+}
+
+function isMediaReferenced(project: StudioProject, mediaId: string, omit: { characterId: string; wholeCharacter?: boolean; gallery?: boolean; outfitId?: string }) {
+  if (project.bannerMediaId === mediaId) return true;
+  if (project.boards.some((board) => board.bannerMediaId === mediaId || board.nodes.some((node) => node.imageId === mediaId) || board.history.some((entry) => entry.snapshot.bannerMediaId === mediaId || entry.snapshot.nodes.some((node) => node.imageId === mediaId)))) return true;
+  return project.characters.some((character) => {
+    if (omit.wholeCharacter && character.id === omit.characterId) return false;
+    const galleryReferenced = !(omit.gallery && character.id === omit.characterId) && character.imageIds.includes(mediaId);
+    const outfitReferenced = character.outfits.some((outfit) => !(character.id === omit.characterId && outfit.id === omit.outfitId) && outfit.imageIds.includes(mediaId));
+    return galleryReferenced || outfitReferenced;
+  });
 }
 
 function editCharacter(

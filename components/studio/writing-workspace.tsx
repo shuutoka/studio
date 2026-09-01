@@ -139,7 +139,11 @@ export function WritingWorkspace({
 
   function importWriting(document: ImportedWritingDocument) {
     const volume = createEmptyVolume(project.volumes.length + 1, document.title);
-    volume.chapters[0].pages = document.pages.map((content, index) => ({ ...createEmptyPage(index + 1), content }));
+    volume.chapters[0].pages = document.pages.map((content, index) => ({
+      ...createEmptyPage(index + 1),
+      content,
+      formatOverride: document.pageFormat,
+    }));
     updateProject((draft) => draft.volumes.push(volume));
     goToPage(volume.chapters[0].pages[0].id);
   }

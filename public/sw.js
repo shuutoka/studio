@@ -1,4 +1,4 @@
-const CACHE_NAME = "enfer-fatal-studio-v8-writing-boards-media-drive";
+const CACHE_NAME = "enfer-fatal-studio-pansement";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => {

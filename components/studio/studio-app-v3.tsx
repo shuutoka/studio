@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ChevronRight, FileArchive, FileText, HardDrive, Home, Images, Import, Library,
+  ChevronRight, CloudDownload, FileArchive, FileText, HardDrive, Home, Images, Import, Library,
   Plus, Save, Settings,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -34,7 +34,8 @@ import { Toaster } from "@/components/ui/sonner";
 import { playInterfaceSound } from "@/lib/interface-sound";
 import { optimizeImage } from "@/lib/image-optimization";
 import {
-  authorizeGoogleDrive, downloadGoogleDriveBackup, listGoogleDriveBackups,
+  authorizeGoogleDrive, canPickFromGoogleDrive, downloadGoogleDriveBackup,
+  GoogleDrivePickerCancelledError, pickGoogleDriveBackup, resolveGoogleDriveConfiguration,
   saveBackupToGoogleDrive, type GoogleDriveBackupFile,
 } from "@/lib/google-drive";
 import { createStudioBackup, downloadStudioBackup, readStudioBackup } from "@/lib/project-file";
@@ -73,7 +74,7 @@ export function StudioAppV3() {
   const [newProjectType, setNewProjectType] = useState<ProjectType>("manga");
   const [deleteTarget, setDeleteTarget] = useState<StudioProject | null>(null);
   const [driveBusy, setDriveBusy] = useState(false);
-  const [driveFiles, setDriveFiles] = useState<GoogleDriveBackupFile[] | null>(null);
+  const [startupDriveReady, setStartupDriveReady] = useState(() => canPickFromGoogleDrive(resolveGoogleDriveConfiguration(createDefaultSettings())));
   const recoveryProjects = useRef<StudioProject[]>([]);
   const recoverySettings = useRef<StudioSettings>(createDefaultSettings());
   const driveTokenRef = useRef<string | null>(null);
@@ -96,6 +97,7 @@ export function StudioAppV3() {
         recoveryProjects.current = storedProjects.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
         recoverySettings.current = migrateLegacyFonts(storedProjects, storedSettings);
         setBackupAvailable(storedProjects.length > 0 || storedSettings.revision > 1);
+        setStartupDriveReady(canPickFromGoogleDrive(resolveGoogleDriveConfiguration(recoverySettings.current)));
       })
       .catch(() => { if (!cancelled) toast.error("La copie locale de secours n’est pas disponible."); });
     return () => { cancelled = true; };
@@ -187,7 +189,8 @@ export function StudioAppV3() {
   async function saveAllToDrive() {
     setDriveBusy(true);
     try {
-      const token = await authorizeGoogleDrive(settings.googleDriveClientId);
+      const configuration = resolveGoogleDriveConfiguration(settings);
+      const token = await authorizeGoogleDrive(configuration.clientId);
       driveTokenRef.current = token;
       const firstArchive = await createStudioBackup(projects, settings, "efs");
       let driveFile = await saveBackupToGoogleDrive(token, firstArchive.blob, firstArchive.filename, settings.googleDriveFileId || undefined);
@@ -207,30 +210,31 @@ export function StudioAppV3() {
     }
   }
 
-  async function openDriveBackups() {
+  async function openDriveBackups(sourceSettings: StudioSettings = settings) {
     setDriveBusy(true);
     try {
-      const token = await authorizeGoogleDrive(settings.googleDriveClientId);
-      driveTokenRef.current = token;
-      const files = await listGoogleDriveBackups(token);
-      if (!files.length) toast.message("Aucune sauvegarde .efs accessible n’a été trouvée sur Google Drive.");
-      else setDriveFiles(files);
+      const configuration = resolveGoogleDriveConfiguration(sourceSettings);
+      const picked = await pickGoogleDriveBackup(configuration, driveTokenRef.current);
+      driveTokenRef.current = picked.token;
+      await loadDriveBackup(picked.file, picked.token);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Google Drive n’est pas accessible.");
+      if (!(error instanceof GoogleDrivePickerCancelledError)) {
+        toast.error(error instanceof Error ? error.message : "Google Drive n’est pas accessible.");
+      }
     } finally {
       setDriveBusy(false);
     }
   }
 
-  async function loadDriveBackup(file: GoogleDriveBackupFile) {
+  async function loadDriveBackup(file: GoogleDriveBackupFile, authorizedToken?: string) {
     setDriveBusy(true);
     try {
-      const token = driveTokenRef.current ?? await authorizeGoogleDrive(settings.googleDriveClientId);
+      const configuration = resolveGoogleDriveConfiguration(settings);
+      const token = authorizedToken ?? driveTokenRef.current ?? await authorizeGoogleDrive(configuration.clientId);
       driveTokenRef.current = token;
       const downloaded = await downloadGoogleDriveBackup(token, file);
       await importBackup(downloaded);
       setSettings((current) => ({ ...current, googleDriveFileId: file.id }));
-      setDriveFiles(null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Cette sauvegarde Drive n’a pas pu être chargée.");
     } finally {
@@ -391,6 +395,26 @@ export function StudioAppV3() {
     setSelectedCharacterId(character.id);
   }
 
+  function setCharacterImageLink(projectId: string, characterId: string, mediaId: string, linked: boolean) {
+    setProjects((current) => current.map((project) => {
+      if (project.id !== projectId) return project;
+      const next = structuredClone(project);
+      const character = next.characters.find((candidate) => candidate.id === characterId);
+      if (!character) return project;
+      if (linked) {
+        if (!character.imageIds.includes(mediaId)) character.imageIds.push(mediaId);
+        character.thumbnailImageId ??= mediaId;
+      } else {
+        character.imageIds = character.imageIds.filter((id) => id !== mediaId);
+        if (character.thumbnailImageId === mediaId) character.thumbnailImageId = character.imageIds[0] ?? null;
+      }
+      next.revision = project.revision + 1;
+      next.updatedAt = new Date().toISOString();
+      return next;
+    }));
+    toast.success(linked ? "Image ajoutée à la galerie du personnage." : "Image retirée de la galerie du personnage.");
+  }
+
   return (
     <SidebarProvider defaultOpen>
       <div className={`studio-shell theme-${settings.theme} flex min-h-svh w-full bg-[#0c0b0f] text-[#eeeaf2]`}>
@@ -417,9 +441,9 @@ export function StudioAppV3() {
           ) : globalView === "library" ? (
             <GlobalLibrary projects={projects} onOpenCharacter={openGlobalCharacter} />
           ) : globalView === "media" ? (
-            <MediaGallery projects={projects} onOpenProject={(project) => openProject(project)} onOpenCharacter={(project, characterId) => { openProject(project, "characters"); setSelectedCharacterId(characterId); }} />
+            <MediaGallery projects={projects} onOpenProject={(project) => openProject(project)} onOpenCharacter={(project, characterId) => { openProject(project, "characters"); setSelectedCharacterId(characterId); }} onLinkCharacterImage={setCharacterImageLink} />
           ) : globalView === "settings" ? (
-            <SettingsView settings={settings} updateSettings={updateSettings} onUploadFont={uploadFont} onRemoveFont={removeFont} onSaveDrive={saveAllToDrive} onLoadDrive={openDriveBackups} driveBusy={driveBusy} />
+            <SettingsView settings={settings} updateSettings={updateSettings} onUploadFont={uploadFont} onRemoveFont={removeFont} onSaveDrive={saveAllToDrive} onLoadDrive={() => openDriveBackups(settings)} driveBusy={driveBusy} />
           ) : (
             <HomeView projects={projects} onCreate={() => setCreateDialogOpen(true)} onImport={() => importInputRef.current?.click()} onOpen={openProject} onDelete={setDeleteTarget} onLibrary={() => showGlobal("library")} onCustomize={customizeProjectCard} />
           )}
@@ -433,6 +457,7 @@ export function StudioAppV3() {
           <DialogHeader><div className="mb-2 grid size-12 place-items-center rounded-2xl bg-[#ef4f5f]/12 text-[#ef6977]"><FileArchive className="size-6" /></div><DialogTitle>Ouvrir Enfer Fatal Studio</DialogTitle><DialogDescription className="text-[#9c96a5]">Choisissez les données à charger pour cette session.</DialogDescription></DialogHeader>
           <div className="grid gap-3 py-2">
             <Button className="h-auto justify-start gap-4 bg-[#ef4f5f] p-4 text-left text-white hover:bg-[#ff6675]" onClick={() => importInputRef.current?.click()}><Import className="size-5" /><span><span className="block font-semibold">Charger une sauvegarde du PC</span><span className="mt-1 block text-xs font-normal text-white/75">Fichier .efs, .zip ou ancienne archive .efstudio.zip</span></span></Button>
+            <Button variant="outline" className="h-auto justify-start gap-4 border-[#4ca9ad]/25 bg-[#4ca9ad]/6 p-4 text-left" disabled={driveBusy || !startupDriveReady} onClick={() => void openDriveBackups(recoverySettings.current)}><CloudDownload className="size-5 text-[#74c9cd]" /><span><span className="block font-semibold">Charger depuis Google Drive</span><span className="mt-1 block text-xs font-normal text-[#8f8996]">{startupDriveReady ? "Ouvrir le sélecteur Google et choisir un fichier .efs" : "Configurez d’abord Google Drive dans les paramètres"}</span></span></Button>
             <Button variant="outline" className="h-auto justify-start gap-4 border-white/10 bg-white/3 p-4 text-left" disabled={!backupAvailable} onClick={restoreRecovery}><HardDrive className="size-5" /><span><span className="block font-semibold">Charger la sauvegarde de secours</span><span className="mt-1 block text-xs font-normal text-[#8f8996]">{backupAvailable ? "Récupérer la dernière copie locale automatique" : "Aucune copie locale disponible"}</span></span></Button>
             <Button variant="ghost" className="h-auto justify-start gap-4 p-4 text-left" onClick={startEmpty}><Plus className="size-5" /><span><span className="block font-semibold">Ne charger aucune donnée</span><span className="mt-1 block text-xs font-normal text-[#77717f]">Commencer cette session avec un espace vide</span></span></Button>
           </div>
@@ -442,8 +467,6 @@ export function StudioAppV3() {
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
         <DialogContent className="border-white/10 bg-[#17151d] text-[#eeeaf2]"><DialogHeader><DialogTitle>Nouveau projet</DialogTitle><DialogDescription className="text-[#9c96a5]">Choisissez un type par défaut. Chaque page pourra ensuite utiliser un autre type.</DialogDescription></DialogHeader><div className="grid gap-4"><label className="grid gap-2 text-xs font-medium text-[#aaa4b4]">Nom du projet<Input autoFocus value={newProjectName} placeholder="Mon nouveau projet" className="border-white/10 bg-white/4" onChange={(event) => setNewProjectName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") createProject(); }} /></label><label className="grid gap-2 text-xs font-medium text-[#aaa4b4]">Type de projet<Select value={newProjectType} onValueChange={(value: ProjectType) => setNewProjectType(value)}><SelectTrigger className="w-full border-white/10 bg-white/4"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(PROJECT_TYPE_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select></label></div><DialogFooter><DialogClose asChild><Button variant="ghost">Annuler</Button></DialogClose><Button className="bg-[#ef4f5f] text-white" onClick={createProject}><Plus /> Créer le projet</Button></DialogFooter></DialogContent>
       </Dialog>
-
-      <Dialog open={Boolean(driveFiles)} onOpenChange={(open) => !open && setDriveFiles(null)}><DialogContent className="max-h-[82svh] overflow-hidden border-white/10 bg-[#17151d] text-[#eeeaf2]"><DialogHeader><DialogTitle>Charger depuis Google Drive</DialogTitle><DialogDescription className="text-[#9c96a5]">Choisissez la sauvegarde .efs qui remplacera les données actuellement ouvertes.</DialogDescription></DialogHeader><div className="max-h-[56svh] space-y-2 overflow-y-auto">{driveFiles?.map((file) => <button key={file.id} type="button" className="flex w-full items-center gap-3 rounded-xl border border-white/8 bg-white/3 p-3 text-left hover:border-[#ef4f5f]/35 hover:bg-[#ef4f5f]/6" disabled={driveBusy} onClick={() => void loadDriveBackup(file)}><FileArchive className="size-5 shrink-0 text-[#ef6977]" /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{file.name}</span><span className="mt-1 block text-[11px] text-[#77717f]">Modifié {new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium", timeStyle: "short" }).format(new Date(file.modifiedTime))}</span></span></button>)}</div><DialogFooter><DialogClose asChild><Button variant="ghost">Annuler</Button></DialogClose></DialogFooter></DialogContent></Dialog>
 
       <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}><AlertDialogContent className="border-white/10 bg-[#17151d] text-[#eeeaf2]"><AlertDialogHeader><AlertDialogTitle>Supprimer ce projet de l’appareil ?</AlertDialogTitle><AlertDialogDescription className="text-[#9c96a5]">« {deleteTarget?.name} », ses images et sa copie locale seront supprimés. Un fichier de sauvegarde déjà téléchargé restera intact.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel className="border-white/10 bg-transparent">Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={() => void confirmDeleteProject()}>Supprimer définitivement</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
       <Toaster theme={settings.theme === "light" ? "light" : "dark"} position="bottom-right" richColors />

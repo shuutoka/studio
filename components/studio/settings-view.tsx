@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import {
   Accessibility,
+  Bug,
   CloudDownload,
   CloudUpload,
   Download,
@@ -11,11 +12,14 @@ import {
   Globe2,
   Keyboard,
   Laptop,
+  LoaderCircle,
+  MessageSquareText,
   Palette,
   Plus,
   Search,
   RotateCcw,
   Save,
+  Send,
   Trash2,
   Type,
   Upload,
@@ -26,10 +30,14 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ColorPicker } from "@/components/studio/color-picker";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import { sendFeedback, type FeedbackLabel } from "@/lib/feedback";
+import { canPickFromGoogleDrive, canSaveToGoogleDrive, resolveGoogleDriveConfiguration } from "@/lib/google-drive";
 import { playInterfaceSound } from "@/lib/interface-sound";
 import {
   createDefaultSettings, createId, STANDARD_FONTS, type StudioSettings,
@@ -37,7 +45,7 @@ import {
 } from "@/lib/studio";
 import { isModifierKey, shortcutFromEvent } from "@/lib/shortcuts";
 
-type SettingsSection = "backup" | "fonts" | "appearance" | "writing";
+type SettingsSection = "backup" | "fonts" | "appearance" | "writing" | "feedback";
 
 export function SettingsView({
   settings,
@@ -67,7 +75,9 @@ export function SettingsView({
     { id: "fonts" as const, label: "Polices d’écriture", icon: Type },
     { id: "appearance" as const, label: "Apparence et accessibilité", icon: Accessibility },
     { id: "writing" as const, label: "Écriture et raccourcis", icon: Keyboard },
+    { id: "feedback" as const, label: "Feedback", icon: MessageSquareText },
   ];
+  const driveConfiguration = resolveGoogleDriveConfiguration(settings);
   const fontQuery = fontSearch.trim().toLocaleLowerCase("fr");
   const matchesFont = (name: string, family: string) => !fontQuery || `${name} ${family}`.toLocaleLowerCase("fr").includes(fontQuery);
 
@@ -145,10 +155,16 @@ export function SettingsView({
                   <Field label="Google Drive — identifiant client OAuth" className="sm:col-span-2">
                     <Input value={settings.googleDriveClientId} placeholder="000000000000-….apps.googleusercontent.com" className="border-white/10 bg-black/20" onChange={(event) => updateSettings((draft) => { draft.googleDriveClientId = event.target.value; })} />
                   </Field>
-                  <div className="flex flex-wrap gap-2 sm:col-span-2"><Button className="bg-[#ef4f5f] text-white" disabled={driveBusy || !settings.googleDriveClientId.trim()} onClick={() => void onSaveDrive?.()}><CloudUpload /> Sauvegarder sur Drive</Button><Button variant="outline" className="border-white/10 bg-transparent" disabled={driveBusy || !settings.googleDriveClientId.trim()} onClick={() => void onLoadDrive?.()}><CloudDownload /> Charger depuis Drive</Button></div>
+                  <Field label="Google Picker — clé API" className="sm:col-span-2">
+                    <Input type="password" autoComplete="off" value={settings.googleDriveApiKey} placeholder="AIza…" className="border-white/10 bg-black/20" onChange={(event) => updateSettings((draft) => { draft.googleDriveApiKey = event.target.value; })} />
+                  </Field>
+                  <Field label="Google Picker — numéro du projet (App ID)" className="sm:col-span-2">
+                    <Input inputMode="numeric" value={settings.googleDriveAppId} placeholder="123456789012" className="border-white/10 bg-black/20" onChange={(event) => updateSettings((draft) => { draft.googleDriveAppId = event.target.value; })} />
+                  </Field>
+                  <div className="flex flex-wrap gap-2 sm:col-span-2"><Button className="bg-[#ef4f5f] text-white" disabled={driveBusy || !canSaveToGoogleDrive(driveConfiguration)} onClick={() => void onSaveDrive?.()}><CloudUpload /> Sauvegarder sur Drive</Button><Button variant="outline" className="border-white/10 bg-transparent" disabled={driveBusy || !canPickFromGoogleDrive(driveConfiguration)} onClick={() => void onLoadDrive?.()}><CloudDownload /> Ouvrir le sélecteur Drive</Button></div>
                 </div>
                 <InfoBox icon={Download}>Le format .efs est une archive ZIP non compressée avec une extension propre à Enfer Fatal Studio.</InfoBox>
-                <InfoBox icon={Globe2}>Créez un identifiant OAuth « Application Web » dans Google Cloud, activez l’API Google Drive et ajoutez l’adresse du Studio aux origines JavaScript autorisées. Le Studio demande uniquement l’accès aux fichiers qu’il crée ou que vous ouvrez.</InfoBox>
+                <InfoBox icon={Globe2}>Activez les API Google Drive et Google Picker. Ajoutez l’adresse du Studio aux origines JavaScript autorisées et restreignez la clé API à <strong>studio.lotaku.fr</strong>, <strong>docs.google.com</strong>, Google Picker et Drive. Le Studio demande uniquement l’accès aux fichiers créés ou choisis.</InfoBox>
               </SettingsPanel>
             )}
 
@@ -279,11 +295,76 @@ export function SettingsView({
                 </div>
               </SettingsPanel>
             )}
+
+            {section === "feedback" && <FeedbackPanel />}
           </section>
         </div>
       </div>
     </div>
   );
+}
+
+function FeedbackPanel() {
+  const [open, setOpen] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [name, setName] = useState("");
+  const [title, setTitle] = useState("");
+  const [label, setLabel] = useState<FeedbackLabel>("Bug");
+  const [body, setBody] = useState("");
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!name.trim() || !title.trim() || !body.trim()) return;
+    setSending(true);
+    try {
+      await sendFeedback({ name, title, label, body });
+      setOpen(false);
+      setName("");
+      setTitle("");
+      setLabel("Bug");
+      setBody("");
+      toast.success("Feedback envoyé. Merci pour votre message.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Le feedback n’a pas pu être envoyé.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return <>
+    <SettingsPanel icon={MessageSquareText} title="Feedback" description="Signalez un problème ou proposez une amélioration du Studio.">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <article className="flex min-h-44 flex-col rounded-2xl border border-white/8 bg-black/15 p-5">
+          <span className="grid size-10 place-items-center rounded-xl bg-white/6 text-white"><Bug className="size-5" /></span>
+          <h3 className="mt-4 font-semibold text-white">Report GitHub</h3>
+          <p className="mt-2 flex-1 text-sm leading-6 text-[#8f8996]">Consultez les signalements existants ou ouvrez une issue publique avec captures et détails techniques.</p>
+          <Button asChild variant="outline" className="mt-5 w-fit border-white/10 bg-transparent"><a href="https://github.com/shuutoka/studio/issues/" target="_blank" rel="noreferrer"><Bug /> Ouvrir GitHub <ExternalLink className="size-3" /></a></Button>
+        </article>
+        <article className="flex min-h-44 flex-col rounded-2xl border border-[#ef4f5f]/18 bg-[#ef4f5f]/5 p-5">
+          <span className="grid size-10 place-items-center rounded-xl bg-[#ef4f5f]/14 text-[#ff8a95]"><MessageSquareText className="size-5" /></span>
+          <h3 className="mt-4 font-semibold text-white">Formulaire privé</h3>
+          <p className="mt-2 flex-1 text-sm leading-6 text-[#9c96a5]">Envoyez directement un bug, une amélioration ou une idée de fonctionnalité par e-mail.</p>
+          <Button className="mt-5 w-fit bg-[#ef4f5f] text-white hover:bg-[#ff6675]" onClick={() => setOpen(true)}><Send /> Ouvrir le formulaire</Button>
+        </article>
+      </div>
+      <InfoBox icon={MessageSquareText}>Le formulaire utilise FormSubmit pour transmettre le message à l’adresse de support. Aucun projet ni fichier du Studio n’est joint automatiquement.</InfoBox>
+    </SettingsPanel>
+
+    <Dialog open={open} onOpenChange={(nextOpen) => !sending && setOpen(nextOpen)}>
+      <DialogContent className="border-white/10 bg-[#17151d] text-[#eeeaf2]">
+        <form className="grid gap-4" onSubmit={(event) => void submit(event)}>
+          <DialogHeader><DialogTitle>Envoyer un feedback</DialogTitle><DialogDescription className="text-[#9c96a5]">Décrivez ce qui s’est passé ou ce que vous aimeriez ajouter.</DialogDescription></DialogHeader>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Nom"><Input required autoComplete="name" value={name} className="border-white/10 bg-black/20" onChange={(event) => setName(event.target.value)} /></Field>
+            <Field label="Type"><Select value={label} onValueChange={(value: FeedbackLabel) => setLabel(value)}><SelectTrigger className="w-full border-white/10 bg-black/20"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Bug">Bug</SelectItem><SelectItem value="Amélioration">Amélioration</SelectItem><SelectItem value="Nouvelle fonctionnalité">Nouvelle fonctionnalité</SelectItem></SelectContent></Select></Field>
+            <Field label="Titre" className="sm:col-span-2"><Input required value={title} className="border-white/10 bg-black/20" onChange={(event) => setTitle(event.target.value)} /></Field>
+            <Field label="Message" className="sm:col-span-2"><Textarea required value={body} rows={7} placeholder="Étapes, résultat observé, résultat attendu…" className="resize-y border-white/10 bg-black/20" onChange={(event) => setBody(event.target.value)} /></Field>
+          </div>
+          <DialogFooter><Button type="button" variant="ghost" disabled={sending} onClick={() => setOpen(false)}>Annuler</Button><Button type="submit" className="bg-[#ef4f5f] text-white" disabled={sending || !name.trim() || !title.trim() || !body.trim()}>{sending ? <LoaderCircle className="animate-spin" /> : <Send />} {sending ? "Envoi…" : "Envoyer"}</Button></DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  </>;
 }
 
 function systemFontId(family: string) {

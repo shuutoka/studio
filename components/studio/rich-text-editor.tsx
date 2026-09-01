@@ -76,7 +76,7 @@ type RichTextEditorProps = {
 const allowedElements = new Set([
   "A", "B", "BLOCKQUOTE", "BR", "DIV", "EM", "FONT", "H1", "H2", "H3", "H4",
   "HR", "I", "IMG", "LI", "OL", "P", "PRE", "S", "SPAN", "STRIKE", "STRONG",
-  "SUB", "SUP", "U", "UL",
+  "SUB", "SUP", "TABLE", "TBODY", "TD", "TH", "TR", "U", "UL",
 ]);
 
 const specialCharacterGroups = {
@@ -325,6 +325,11 @@ export function RichTextEditor({
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>, pageId: string) {
     activePageIdRef.current = pageId;
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLocaleLowerCase("en") === "a") {
+      event.preventDefault();
+      selectWholeDocument(pages, editorsRef.current);
+      return;
+    }
     if (
       (event.key === "Backspace" || event.key === "Delete") &&
       !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey &&
@@ -549,6 +554,23 @@ function ToolbarButton({ label, onClick, children }: { label: string; onClick: (
 
 function ToolbarDivider() {
   return <span aria-hidden="true" className="mx-1 h-5 w-px shrink-0 bg-white/10" />;
+}
+
+function selectWholeDocument(pages: RichTextEditorPage[], editors: Map<string, HTMLDivElement>) {
+  const orderedEditors = pages.flatMap((page) => {
+    const editor = editors.get(page.id);
+    return editor ? [editor] : [];
+  });
+  const first = orderedEditors[0];
+  const last = orderedEditors.at(-1);
+  if (!first || !last) return;
+  first.focus({ preventScroll: true });
+  const range = document.createRange();
+  range.setStart(first, 0);
+  range.setEnd(last, last.childNodes.length);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
 }
 
 function isCaretAtEditorStart(editor: HTMLDivElement) {

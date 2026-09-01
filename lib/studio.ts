@@ -27,12 +27,14 @@ export const PAGE_FORMATS: Record<
   PageFormat,
   { label: string; detail: string; width: number; height: number | null }
 > = {
-  free: { label: "Libre", detail: "Sans limite de page", width: 760, height: null },
-  a4: { label: "A4", detail: "210 × 297 mm", width: 680, height: 962 },
-  a5: { label: "A5", detail: "148 × 210 mm", width: 520, height: 738 },
-  pocket: { label: "Livre de poche", detail: "110 × 178 mm", width: 440, height: 712 },
-  novel: { label: "Roman standard", detail: "140 × 216 mm", width: 520, height: 802 },
-  large: { label: "Grand format", detail: "170 × 240 mm", width: 620, height: 875 },
+  free: { label: "Libre", detail: "Sans limite de page", width: 794, height: null },
+  // CSS uses 96 px per inch. Keeping the real millimetre ratio and scale here makes
+  // pagination match office suites instead of rendering a reduced paper surface.
+  a4: { label: "A4", detail: "210 × 297 mm", width: 794, height: 1123 },
+  a5: { label: "A5", detail: "148 × 210 mm", width: 559, height: 794 },
+  pocket: { label: "Livre de poche", detail: "110 × 178 mm", width: 416, height: 673 },
+  novel: { label: "Roman standard", detail: "140 × 216 mm", width: 529, height: 816 },
+  large: { label: "Grand format", detail: "170 × 240 mm", width: 643, height: 907 },
 };
 
 export const STANDARD_FONTS = [
@@ -211,13 +213,15 @@ export type StudioShortcuts = {
 };
 
 export type StudioSettings = {
-  schemaVersion: 5;
+  schemaVersion: 6;
   id: "studio-settings";
   revision: number;
   savedRevision: number;
   backupExtension: BackupExtension;
   backupFilename: string;
   googleDriveClientId: string;
+  googleDriveApiKey: string;
+  googleDriveAppId: string;
   googleDriveFileId: string;
   theme: AppTheme;
   zoom: number;
@@ -287,13 +291,15 @@ export function createId(prefix: string) {
 
 export function createDefaultSettings(): StudioSettings {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     id: "studio-settings",
     revision: 1,
     savedRevision: 1,
     backupExtension: "efs",
     backupFilename: "enfer-fatal-studio",
     googleDriveClientId: "",
+    googleDriveApiKey: "",
+    googleDriveAppId: "",
     googleDriveFileId: "",
     theme: "normal",
     zoom: 100,
@@ -348,6 +354,8 @@ export function normalizeSettings(value: unknown): StudioSettings {
         ? input.backupFilename.trim()
         : defaults.backupFilename,
     googleDriveClientId: typeof input.googleDriveClientId === "string" ? input.googleDriveClientId.trim() : "",
+    googleDriveApiKey: typeof input.googleDriveApiKey === "string" ? input.googleDriveApiKey.trim() : "",
+    googleDriveAppId: typeof input.googleDriveAppId === "string" ? input.googleDriveAppId.trim() : "",
     googleDriveFileId: typeof input.googleDriveFileId === "string" ? input.googleDriveFileId.trim() : "",
     theme: ["normal", "dark", "light"].includes(input.theme ?? "")
       ? input.theme as AppTheme
