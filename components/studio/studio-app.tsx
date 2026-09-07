@@ -506,7 +506,7 @@ function StudioSidebar({
     <Sidebar collapsible="icon" className="border-r border-white/7 bg-[#111015]">
       <SidebarHeader className="px-3 py-4">
         <button className="flex items-center gap-3 rounded-xl p-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-[#ef4f5f]" onClick={onHome}>
-          <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#ef4f5f] font-black text-white shadow-[0_8px_24px_rgba(239,79,95,.22)]">EF</span>
+         <img src="./icon-192.png" alt=""className="size-9 shrink-0 rounded-xl object-cover"/>
           <span className="min-w-0 group-data-[collapsible=icon]:hidden">
             <span className="block truncate text-sm font-bold">Enfer Fatal Studio</span>
             <span className="block text-[11px] text-[#77717f]">Studio local</span>
