@@ -30,7 +30,7 @@ export const metadata: Metadata = {
     sizes: "180x180",
     type: "image/png",
   },
-};
+},
 
 export default function RootLayout({
   children,
