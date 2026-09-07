@@ -35,6 +35,7 @@ globale `.efs` ou `.zip`.
 - caractères spéciaux, guillemets et raccourcis d’écriture personnalisables ;
 - export d’un manuscrit en DOC, DOCX, ODT, PDF, HTML ou TXT ;
 - import d’un manuscrit DOCX, ODT, TXT ou HTML dans un nouveau volume ;
+- informations légales accessibles en permanence, politique de confidentialité et consentement du formulaire de feedback ;
 - fonctionnement hors ligne progressif grâce au service worker.
 
 La copie IndexedDB sert uniquement à récupérer le travail sur le même appareil.
@@ -69,6 +70,19 @@ Le site statique est généré dans `dist/client`.
 Le workflow adapte automatiquement le chemin des fichiers, aussi bien pour un
 dépôt classique (`utilisateur.github.io/enfer-fatal-studio/`) que pour un dépôt
 racine (`utilisateur.github.io`).
+
+## Informations légales
+
+Les mentions affichées par l’application sont centralisées dans
+`lib/legal.ts`. La configuration fournie correspond à une publication gratuite
+et non professionnelle sous le pseudonyme **Shuutoka**, hébergée par GitHub
+Pages avec un nom de domaine enregistré chez OVH. Une version directement
+consultable est générée à l’adresse `/legal/`.
+
+Avant publication, adaptez ce fichier si le statut de l’éditeur change. En cas
+d’utilisation professionnelle ou commerciale, il faudra notamment remplacer le
+pseudonyme par l’identité légale complète et ajouter les informations
+d’immatriculation, de contact et de TVA applicables.
 
 ## Contenu d’une sauvegarde
 

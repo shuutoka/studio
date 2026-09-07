@@ -7,7 +7,7 @@ export type FeedbackMessage = {
   body: string;
 };
 
-const FEEDBACK_ENDPOINT = "https://formsubmit.co/ajax/ggchoutca@gmail.com";
+const FEEDBACK_ENDPOINT = "https://formsubmit.co/ajax/studio@report.lotaku.fr";
 
 export async function sendFeedback(message: FeedbackMessage) {
   const form = new FormData();

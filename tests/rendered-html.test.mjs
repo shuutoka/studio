@@ -30,6 +30,24 @@ test("renders the static studio shell", async () => {
   assert.match(html, /<title>Enfer Fatal Studio<\/title>/i);
   assert.match(html, />Visionneuse</i);
   assert.match(html, />Paramètres</i);
+  assert.match(html, />Informations légales</i);
   assert.doesNotMatch(html, /Bonjour, Mon Empereur\./i);
   assert.doesNotMatch(html, /Commencez à écrire ici/i);
+
+  const legalResponse = await worker.fetch(
+    new Request("http://localhost/legal/", { headers: { accept: "text/html" } }),
+    {
+      ASSETS: {
+        fetch: async () => new Response("Not found", { status: 404 }),
+      },
+    },
+    {
+      waitUntil() {},
+      passThroughOnException() {},
+    },
+  );
+  assert.equal(legalResponse.status, 200);
+  const legalHtml = await legalResponse.text();
+  assert.match(legalHtml, /Informations légales — Enfer Fatal Studio/i);
+  assert.match(legalHtml, /Confidentialité et données personnelles/i);
 });

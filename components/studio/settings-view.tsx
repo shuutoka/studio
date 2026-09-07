@@ -20,6 +20,7 @@ import {
   RotateCcw,
   Save,
   Send,
+  ShieldCheck,
   Trash2,
   Type,
   Upload,
@@ -54,6 +55,7 @@ export function SettingsView({
   onRemoveFont,
   onSaveDrive,
   onLoadDrive,
+  onOpenLegal,
   driveBusy = false,
 }: {
   settings: StudioSettings;
@@ -62,6 +64,7 @@ export function SettingsView({
   onRemoveFont: (fontId: string) => Promise<void>;
   onSaveDrive?: () => Promise<void>;
   onLoadDrive?: () => Promise<void>;
+  onOpenLegal?: () => void;
   driveBusy?: boolean;
 }) {
   const [section, setSection] = useState<SettingsSection>("backup");
@@ -296,7 +299,7 @@ export function SettingsView({
               </SettingsPanel>
             )}
 
-            {section === "feedback" && <FeedbackPanel />}
+            {section === "feedback" && <FeedbackPanel onOpenLegal={onOpenLegal} />}
           </section>
         </div>
       </div>
@@ -304,17 +307,18 @@ export function SettingsView({
   );
 }
 
-function FeedbackPanel() {
+function FeedbackPanel({ onOpenLegal }: { onOpenLegal?: () => void }) {
   const [open, setOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [name, setName] = useState("");
   const [title, setTitle] = useState("");
   const [label, setLabel] = useState<FeedbackLabel>("Bug");
   const [body, setBody] = useState("");
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!name.trim() || !title.trim() || !body.trim()) return;
+    if (!name.trim() || !title.trim() || !body.trim() || !privacyAccepted) return;
     setSending(true);
     try {
       await sendFeedback({ name, title, label, body });
@@ -323,6 +327,7 @@ function FeedbackPanel() {
       setTitle("");
       setLabel("Bug");
       setBody("");
+      setPrivacyAccepted(false);
       toast.success("Feedback envoyé. Merci pour votre message.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Le feedback n’a pas pu être envoyé.");
@@ -360,7 +365,29 @@ function FeedbackPanel() {
             <Field label="Titre" className="sm:col-span-2"><Input required value={title} className="border-white/10 bg-black/20" onChange={(event) => setTitle(event.target.value)} /></Field>
             <Field label="Message" className="sm:col-span-2"><Textarea required value={body} rows={7} placeholder="Étapes, résultat observé, résultat attendu…" className="resize-y border-white/10 bg-black/20" onChange={(event) => setBody(event.target.value)} /></Field>
           </div>
-          <DialogFooter><Button type="button" variant="ghost" disabled={sending} onClick={() => setOpen(false)}>Annuler</Button><Button type="submit" className="bg-[#ef4f5f] text-white" disabled={sending || !name.trim() || !title.trim() || !body.trim()}>{sending ? <LoaderCircle className="animate-spin" /> : <Send />} {sending ? "Envoi…" : "Envoyer"}</Button></DialogFooter>
+          <div className="rounded-xl border border-white/8 bg-black/15 p-4">
+            <label className="flex cursor-pointer items-start gap-3 text-xs leading-5 text-[#aaa4b4]">
+              <input
+                required
+                type="checkbox"
+                checked={privacyAccepted}
+                className="mt-0.5 size-4 shrink-0 accent-[#ef4f5f]"
+                onChange={(event) => setPrivacyAccepted(event.target.checked)}
+              />
+              <span>J’accepte que les informations saisies soient transmises à FormSubmit puis à l’éditeur par e-mail afin de traiter ce feedback.</span>
+            </label>
+            <button
+              type="button"
+              className="mt-3 inline-flex items-center gap-1 text-xs text-[#ff8a95] underline decoration-[#ef4f5f]/35 underline-offset-4 hover:text-[#ffabb3]"
+              onClick={() => {
+                setOpen(false);
+                onOpenLegal?.();
+              }}
+            >
+              <ShieldCheck className="size-3" /> Lire la politique de confidentialité
+            </button>
+          </div>
+          <DialogFooter><Button type="button" variant="ghost" disabled={sending} onClick={() => setOpen(false)}>Annuler</Button><Button type="submit" className="bg-[#ef4f5f] text-white" disabled={sending || !name.trim() || !title.trim() || !body.trim() || !privacyAccepted}>{sending ? <LoaderCircle className="animate-spin" /> : <Send />} {sending ? "Envoi…" : "Envoyer"}</Button></DialogFooter>
         </form>
       </DialogContent>
     </Dialog>

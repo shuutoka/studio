@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronRight, CloudDownload, FileArchive, FileText, HardDrive, Home, Images, Import, Library,
-  Plus, Save, Settings,
+  Plus, Save, Scale, Settings,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { GlobalLibrary } from "@/components/studio/global-library";
+import { LegalInformation } from "@/components/studio/legal-information";
 import { MediaGallery } from "@/components/studio/media-gallery";
 import { SettingsView } from "@/components/studio/settings-view";
 import {
@@ -50,7 +51,7 @@ import {
   type StudioSettings,
 } from "@/lib/studio";
 
-type GlobalView = "home" | "library" | "media" | "settings";
+type GlobalView = "home" | "library" | "media" | "settings" | "legal";
 
 function firstPageId(project: StudioProject) {
   return project.volumes[0]?.chapters[0]?.pages[0]?.id ?? null;
@@ -61,6 +62,7 @@ export function StudioAppV3() {
   const [settings, setSettings] = useState<StudioSettings>(createDefaultSettings);
   const [loaded, setLoaded] = useState(false);
   const [startupOpen, setStartupOpen] = useState(true);
+  const [startupLegalOpen, setStartupLegalOpen] = useState(false);
   const [backupAvailable, setBackupAvailable] = useState(false);
   const [globalView, setGlobalView] = useState<GlobalView>("home");
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
@@ -443,7 +445,9 @@ export function StudioAppV3() {
           ) : globalView === "media" ? (
             <MediaGallery projects={projects} onOpenProject={(project) => openProject(project)} onOpenCharacter={(project, characterId) => { openProject(project, "characters"); setSelectedCharacterId(characterId); }} onLinkCharacterImage={setCharacterImageLink} />
           ) : globalView === "settings" ? (
-            <SettingsView settings={settings} updateSettings={updateSettings} onUploadFont={uploadFont} onRemoveFont={removeFont} onSaveDrive={saveAllToDrive} onLoadDrive={() => openDriveBackups(settings)} driveBusy={driveBusy} />
+            <SettingsView settings={settings} updateSettings={updateSettings} onUploadFont={uploadFont} onRemoveFont={removeFont} onSaveDrive={saveAllToDrive} onLoadDrive={() => openDriveBackups(settings)} onOpenLegal={() => showGlobal("legal")} driveBusy={driveBusy} />
+          ) : globalView === "legal" ? (
+            <LegalInformation />
           ) : (
             <HomeView projects={projects} onCreate={() => setCreateDialogOpen(true)} onImport={() => importInputRef.current?.click()} onOpen={openProject} onDelete={setDeleteTarget} onLibrary={() => showGlobal("library")} onCustomize={customizeProjectCard} />
           )}
@@ -461,6 +465,16 @@ export function StudioAppV3() {
             <Button variant="outline" className="h-auto justify-start gap-4 border-white/10 bg-white/3 p-4 text-left" disabled={!backupAvailable} onClick={restoreRecovery}><HardDrive className="size-5" /><span><span className="block font-semibold">Charger la sauvegarde de secours</span><span className="mt-1 block text-xs font-normal text-[#8f8996]">{backupAvailable ? "Récupérer la dernière copie locale automatique" : "Aucune copie locale disponible"}</span></span></Button>
             <Button variant="ghost" className="h-auto justify-start gap-4 p-4 text-left" onClick={startEmpty}><Plus className="size-5" /><span><span className="block font-semibold">Ne charger aucune donnée</span><span className="mt-1 block text-xs font-normal text-[#77717f]">Commencer cette session avec un espace vide</span></span></Button>
           </div>
+          <button type="button" className="mx-auto text-xs text-[#8f8996] underline decoration-white/15 underline-offset-4 hover:text-white" onClick={() => setStartupLegalOpen(true)}>
+            Informations légales et confidentialité
+          </button>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={startupLegalOpen} onOpenChange={setStartupLegalOpen}>
+        <DialogContent className="max-w-5xl border-white/10 bg-[#17151d] text-[#eeeaf2] sm:max-w-5xl">
+          <DialogHeader className="sr-only"><DialogTitle>Informations légales</DialogTitle><DialogDescription>Mentions légales, confidentialité et conditions d’utilisation.</DialogDescription></DialogHeader>
+          <LegalInformation compact />
         </DialogContent>
       </Dialog>
 
@@ -495,12 +509,12 @@ function StudioSidebarV3({
     { id: "media" as const, label: "Visionneuse", icon: Images },
     { id: "settings" as const, label: "Paramètres", icon: Settings },
   ];
-  return <Sidebar collapsible="icon" className="border-r border-white/7 bg-[#111015]"><SidebarHeader className="px-3 py-4"><button className="flex items-center gap-3 rounded-xl p-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-[#ef4f5f]" onClick={() => onGlobal("home")}><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#ef4f5f] font-black text-white">EF</span><span className="min-w-0 group-data-[collapsible=icon]:hidden"><span className="block truncate text-sm font-bold">Enfer Fatal Studio</span><span className="block text-[11px] text-[#77717f]">Studio local</span></span></button></SidebarHeader><SidebarSeparator className="bg-white/7" /><SidebarContent><SidebarGroup><SidebarMenu>{globalItems.map((item) => { const Icon = item.icon; return <SidebarMenuItem key={item.id}><SidebarMenuButton tooltip={item.label} isActive={!activeProject && globalView === item.id} onClick={() => onGlobal(item.id)}><Icon /><span>{item.label}</span></SidebarMenuButton></SidebarMenuItem>; })}<SidebarMenuItem><SidebarMenuButton tooltip="Nouveau projet" onClick={onCreate}><Plus /><span>Nouveau projet</span></SidebarMenuButton></SidebarMenuItem></SidebarMenu></SidebarGroup>{activeProject ? <SidebarGroup><SidebarGroupLabel className="uppercase tracking-[.12em]">{activeProject.name}</SidebarGroupLabel><SidebarGroupContent><SidebarMenu>{sectionItems.map((item) => { const Icon = item.icon; return <SidebarMenuItem key={item.id}><SidebarMenuButton tooltip={item.label} isActive={section === item.id} onClick={() => onSectionChange(item.id)}><Icon /><span>{item.label}</span></SidebarMenuButton></SidebarMenuItem>; })}</SidebarMenu></SidebarGroupContent></SidebarGroup> : <SidebarGroup><SidebarGroupLabel className="uppercase tracking-[.12em]">Récents</SidebarGroupLabel><SidebarGroupContent><SidebarMenu>{recentProjects.map((project) => <SidebarMenuItem key={project.id}><SidebarMenuButton tooltip={project.name} onClick={() => onOpenProject(project)}><FileText /><span>{project.name}</span></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu></SidebarGroupContent></SidebarGroup>}</SidebarContent><SidebarFooter><button className={`flex items-center gap-2 rounded-lg p-2 text-xs group-data-[collapsible=icon]:justify-center ${dirty ? "bg-[#e6b35f]/8 text-[#e6b35f]" : "bg-[#58c68a]/8 text-[#7fc99c]"}`} onClick={onSave}><Save className="size-4" /><span className="group-data-[collapsible=icon]:hidden">{dirty ? "Sauvegarder les projets" : "Tout est enregistré"}</span></button></SidebarFooter><SidebarRail /></Sidebar>;
+  return <Sidebar collapsible="icon" className="border-r border-white/7 bg-[#111015]"><SidebarHeader className="px-3 py-4"><button className="flex items-center gap-3 rounded-xl p-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-[#ef4f5f]" onClick={() => onGlobal("home")}><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#ef4f5f] font-black text-white">EF</span><span className="min-w-0 group-data-[collapsible=icon]:hidden"><span className="block truncate text-sm font-bold">Enfer Fatal Studio</span><span className="block text-[11px] text-[#77717f]">Studio local</span></span></button></SidebarHeader><SidebarSeparator className="bg-white/7" /><SidebarContent><SidebarGroup><SidebarMenu>{globalItems.map((item) => { const Icon = item.icon; return <SidebarMenuItem key={item.id}><SidebarMenuButton tooltip={item.label} isActive={!activeProject && globalView === item.id} onClick={() => onGlobal(item.id)}><Icon /><span>{item.label}</span></SidebarMenuButton></SidebarMenuItem>; })}<SidebarMenuItem><SidebarMenuButton tooltip="Nouveau projet" onClick={onCreate}><Plus /><span>Nouveau projet</span></SidebarMenuButton></SidebarMenuItem></SidebarMenu></SidebarGroup>{activeProject ? <SidebarGroup><SidebarGroupLabel className="uppercase tracking-[.12em]">{activeProject.name}</SidebarGroupLabel><SidebarGroupContent><SidebarMenu>{sectionItems.map((item) => { const Icon = item.icon; return <SidebarMenuItem key={item.id}><SidebarMenuButton tooltip={item.label} isActive={section === item.id} onClick={() => onSectionChange(item.id)}><Icon /><span>{item.label}</span></SidebarMenuButton></SidebarMenuItem>; })}</SidebarMenu></SidebarGroupContent></SidebarGroup> : <SidebarGroup><SidebarGroupLabel className="uppercase tracking-[.12em]">Récents</SidebarGroupLabel><SidebarGroupContent><SidebarMenu>{recentProjects.map((project) => <SidebarMenuItem key={project.id}><SidebarMenuButton tooltip={project.name} onClick={() => onOpenProject(project)}><FileText /><span>{project.name}</span></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu></SidebarGroupContent></SidebarGroup>}</SidebarContent><SidebarFooter><SidebarMenu><SidebarMenuItem><SidebarMenuButton tooltip="Informations légales" isActive={!activeProject && globalView === "legal"} onClick={() => onGlobal("legal")}><Scale /><span>Informations légales</span></SidebarMenuButton></SidebarMenuItem></SidebarMenu><button className={`flex items-center gap-2 rounded-lg p-2 text-xs group-data-[collapsible=icon]:justify-center ${dirty ? "bg-[#e6b35f]/8 text-[#e6b35f]" : "bg-[#58c68a]/8 text-[#7fc99c]"}`} onClick={onSave}><Save className="size-4" /><span className="group-data-[collapsible=icon]:hidden">{dirty ? "Sauvegarder les projets" : "Tout est enregistré"}</span></button></SidebarFooter><SidebarRail /></Sidebar>;
 }
 
 function StudioTopbarV3({ activeProject, globalView, section, dirty, extension, onHome, onSave }: { activeProject: StudioProject | null; globalView: GlobalView; section: Section; dirty: boolean; extension: "efs" | "zip"; onHome: () => void; onSave: () => void }) {
   const sectionName = sectionItems.find((item) => item.id === section)?.label;
-  const globalLabel = { home: "Accueil", library: "Personnages", media: "Visionneuse", settings: "Paramètres" }[globalView];
+  const globalLabel = { home: "Accueil", library: "Personnages", media: "Visionneuse", settings: "Paramètres", legal: "Informations légales" }[globalView];
   return <header className="sticky top-0 z-20 flex h-16 shrink-0 items-center gap-3 border-b border-white/7 bg-[#0c0b0f]/92 px-4 backdrop-blur-xl sm:px-6"><SidebarTrigger className="text-[#aaa4b4]" /><div className="flex min-w-0 items-center gap-2 text-sm"><button className="text-[#77717f] hover:text-white" onClick={onHome}>Studio</button><ChevronRight className="size-4 text-[#4e4953]" />{activeProject ? <><span className="max-w-40 truncate font-medium text-[#dcd7e3]">{activeProject.name}</span><ChevronRight className="hidden size-4 text-[#4e4953] sm:block" /><span className="hidden text-[#77717f] sm:block">{sectionName}</span></> : <span className="text-[#dcd7e3]">{globalLabel}</span>}</div><div className="ml-auto flex items-center gap-3"><span className={`hidden items-center gap-2 text-xs sm:flex ${dirty ? "text-[#e6b35f]" : "text-[#7fc99c]"}`}><span className={`size-1.5 rounded-full ${dirty ? "bg-[#e6b35f]" : "bg-[#58c68a]"}`} />{dirty ? "Modifications non sauvegardées" : "Tout est enregistré"}</span><Button size="sm" className="bg-[#ef4f5f] text-white hover:bg-[#ff6675]" onClick={onSave}><Save /><span className="hidden sm:inline">Sauvegarder .{extension}</span></Button></div></header>;
 }
 

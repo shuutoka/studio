@@ -1,4 +1,4 @@
-const CACHE_NAME = "enfer-fatal-studio-pansement";
+const CACHE_NAME = "enfer-fatal-studio-infos-legales";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => {

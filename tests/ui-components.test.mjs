@@ -280,7 +280,28 @@ test("ships the Pansement writing, Drive, feedback and image-link fixes", async 
   assert.match(drive, /setDeveloperKey/);
   assert.match(app, /Charger depuis Google Drive/);
   assert.match(settingsView, /Feedback/);
-  assert.match(feedback, /formsubmit\.co\/ajax\/ggchoutca@gmail\.com/);
+  assert.match(feedback, /formsubmit\.co\/ajax\/studio@report\.lotaku\.fr/);
   assert.match(mediaPreview, /Ajouter à une galerie/);
   assert.match(mediaPreview, /Déjà ajoutée à/);
+});
+
+test("renders the legal notice and requires feedback privacy consent", async () => {
+  const { LegalInformation } = await vite.ssrLoadModule("/components/studio/legal-information.tsx");
+  const html = renderToStaticMarkup(React.createElement(LegalInformation, { compact: true }));
+  const app = await readFile(path.join(root, "components/studio/studio-app-v3.tsx"), "utf8");
+  const settingsView = await readFile(path.join(root, "components/studio/settings-view.tsx"), "utf8");
+  const serviceWorker = await readFile(path.join(root, "public/sw.js"), "utf8");
+
+  assert.match(html, /Mentions légales/);
+  assert.match(html, /Confidentialité et données personnelles/);
+  assert.match(html, /Conditions d’utilisation/);
+  assert.match(html, /GitHub, Inc\./);
+  assert.match(html, /OVH SAS/);
+  assert.match(html, /FormSubmit/);
+  assert.match(html, /Google Drive/);
+  assert.match(app, /Informations légales et confidentialité/);
+  assert.match(app, /globalView === "legal"/);
+  assert.match(settingsView, /privacyAccepted/);
+  assert.match(settingsView, /J’accepte que les informations saisies/);
+  assert.match(serviceWorker, /enfer-fatal-studio-infos-legales/);
 });
