@@ -3,7 +3,8 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Enfer Fatal Studio",
-  description: "Un studio local-first pour organiser et écrire vos projets narratifs.",
+  description:
+    "Un studio local-first pour organiser et écrire vos projets narratifs.",
   manifest: "./manifest.webmanifest",
   applicationName: "Enfer Fatal Studio",
   appleWebApp: {
@@ -12,25 +13,26 @@ export const metadata: Metadata = {
     statusBarStyle: "black-translucent",
   },
   icons: {
-  icon: [
-    {
-      url: "./favicon-32.png",
-      sizes: "32x32",
+    icon: [
+      {
+        url: "./favicon-32.png",
+        sizes: "32x32",
+        type: "image/png",
+      },
+      {
+        url: "./icon-192.png",
+        sizes: "192x192",
+        type: "image/png",
+      },
+    ],
+    shortcut: "./favicon-32.png",
+    apple: {
+      url: "./apple-touch-icon.png",
+      sizes: "180x180",
       type: "image/png",
     },
-    {
-      url: "./icon-192.png",
-      sizes: "192x192",
-      type: "image/png",
-    },
-  ],
-  shortcut: "./favicon-32.png",
-  apple: {
-    url: "./apple-touch-icon.png",
-    sizes: "180x180",
-    type: "image/png",
   },
-},
+};
 
 export default function RootLayout({
   children,
