@@ -1,0 +1,537 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "../vendor/shadcn-tailwind-4.13.0.css";
+
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+}
+
+@utility scrollbar-none {
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@utility scrollbar-gutter-stable {
+  scrollbar-gutter: stable;
+}
+
+:root {
+  color-scheme: dark;
+  --background: #0c0b0f;
+  --foreground: #eeeaf2;
+  --card: #15131a;
+  --card-foreground: #eeeaf2;
+  --popover: #1a171f;
+  --popover-foreground: #eeeaf2;
+  --primary: #ef4f5f;
+  --primary-foreground: #ffffff;
+  --secondary: #24212a;
+  --secondary-foreground: #eeeaf2;
+  --muted: #24212a;
+  --muted-foreground: #96909e;
+  --accent: #29252f;
+  --accent-foreground: #ffffff;
+  --destructive: #d64252;
+  --border: #ffffff14;
+  --input: #ffffff1a;
+  --ring: #ef4f5f;
+  --chart-1: #ef4f5f;
+  --chart-2: #58c68a;
+  --chart-3: #e6b35f;
+  --chart-4: #8277d8;
+  --chart-5: #4ca9ad;
+  --radius: 0.75rem;
+  --sidebar: #111015;
+  --sidebar-foreground: #d8d3de;
+  --sidebar-primary: #ef4f5f;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ffffff0d;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #ffffff12;
+  --sidebar-ring: #ef4f5f;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+* {
+  border-color: var(--border);
+}
+
+html,
+body {
+  min-height: 100%;
+  background: #0c0b0f;
+}
+
+body {
+  margin: 0;
+  color: var(--foreground);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(239, 79, 95, 0.32);
+  color: white;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: #38333d;
+  background-clip: padding-box;
+}
+
+.studio-shell {
+  min-height: var(--studio-viewport-height, 100svh);
+  zoom: var(--studio-zoom, 1);
+  background:
+    radial-gradient(circle at 88% -12%, rgba(121, 43, 57, 0.15), transparent 33rem),
+    #0c0b0f;
+}
+
+.studio-page {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.014) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.014) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+.studio-editor h1 {
+  margin: 0 0 1.5rem;
+  color: white;
+  font-size: 2rem;
+  font-weight: 750;
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+}
+
+.studio-editor h2 {
+  margin: 1.6rem 0 0.8rem;
+  color: white;
+  font-size: 1.45rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.studio-editor h3 {
+  margin: 1.35rem 0 0.65rem;
+  color: #f3eef6;
+  font-size: 1.1rem;
+  font-weight: 650;
+}
+
+.studio-editor h4 {
+  margin: 1.1em 0 0.45em;
+  font-size: 1.05em;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.studio-editor p {
+  margin: 0 0 1rem;
+}
+
+.studio-editor ul,
+.studio-editor ol {
+  margin: 0.75rem 0 1rem 1.5rem;
+}
+
+.studio-editor ul {
+  list-style: disc;
+}
+
+.studio-editor ol {
+  list-style: decimal;
+}
+
+.studio-editor blockquote {
+  margin: 1.25rem 0;
+  border-left: 3px solid #ef4f5f;
+  padding: 0.35rem 0 0.35rem 1.15rem;
+  color: #aaa4b4;
+  font-style: italic;
+}
+
+.studio-editor hr {
+  margin: 2rem 0;
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.studio-editor pre {
+  margin: 1em 0;
+  overflow-x: auto;
+  border-radius: 0.5rem;
+  background: rgba(127, 127, 127, 0.1);
+  padding: 0.75rem;
+  font-family: "Courier New", monospace;
+  white-space: pre-wrap;
+}
+
+.studio-editor img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 1rem auto;
+  border-radius: 0.35rem;
+}
+
+.studio-editor a {
+  color: #ff8a95;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.paper-sheet {
+  border-radius: 3px;
+}
+
+.paper-editor h1,
+.paper-editor h2,
+.paper-editor h3,
+.paper-editor h4 {
+  color: #29262b;
+}
+
+.paper-editor blockquote {
+  color: #68616d;
+}
+
+.editor-dark-surface h1,
+.editor-dark-surface h2,
+.editor-dark-surface h3,
+.editor-dark-surface h4,
+.editor-dark-surface blockquote {
+  color: inherit;
+}
+
+.writing-editor-shell {
+  min-width: 0;
+}
+
+.writing-toolbar {
+  position: relative;
+  z-index: 5;
+}
+
+.writing-page-stack {
+  overscroll-behavior: contain;
+}
+
+.paper-editor hr {
+  border-top-color: rgba(41, 38, 43, 0.16);
+}
+
+.studio-editor font[size="1"] {
+  font-size: 0.75rem;
+}
+
+.studio-editor font[size="2"] {
+  font-size: 0.875rem;
+}
+
+.studio-editor font[size="3"] {
+  font-size: 1rem;
+}
+
+.studio-editor font[size="4"] {
+  font-size: 1.125rem;
+}
+
+.studio-editor font[size="5"] {
+  font-size: 1.5rem;
+}
+
+.studio-editor font[size="6"] {
+  font-size: 2rem;
+}
+
+.studio-editor font[size="7"] {
+  font-size: 2.5rem;
+}
+
+[data-studio-theme="dark"] body,
+[data-studio-theme="dark"] .studio-shell,
+[data-studio-theme="dark"] .studio-page {
+  background-color: #050507;
+}
+
+[data-studio-theme="dark"] [class~="bg-[#131218]"],
+[data-studio-theme="dark"] [class~="bg-[#17151d]"],
+[data-studio-theme="dark"] [class~="bg-[#111015]"],
+[data-studio-theme="dark"] [class~="bg-[#100f14]"] {
+  background-color: #0b0a0e !important;
+}
+
+[data-studio-theme="light"] {
+  color-scheme: light;
+  --foreground: #302b34;
+  --card: #ffffff;
+  --card-foreground: #302b34;
+  --popover: #ffffff;
+  --popover-foreground: #302b34;
+  --secondary: #eee9ef;
+  --secondary-foreground: #302b34;
+  --muted: #eee9ef;
+  --muted-foreground: #6e6672;
+  --accent: #eee9ef;
+  --accent-foreground: #302b34;
+  --border: #302b341f;
+  --input: #302b3426;
+  --sidebar: #f3eff4;
+  --sidebar-foreground: #514a55;
+  --sidebar-accent: #e9e3eb;
+  --sidebar-accent-foreground: #241f27;
+  --sidebar-border: #302b341a;
+}
+
+[data-studio-theme="light"] body,
+[data-studio-theme="light"] .studio-shell,
+[data-studio-theme="light"] .studio-page {
+  background-color: #f5f2f5 !important;
+  color: #302b34 !important;
+}
+
+[data-studio-theme="light"] .studio-page {
+  background-image:
+    linear-gradient(rgba(48, 43, 52, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(48, 43, 52, 0.025) 1px, transparent 1px);
+}
+
+[data-studio-theme="light"] [class~="bg-[#131218]"],
+[data-studio-theme="light"] [class~="bg-[#17151d]"],
+[data-studio-theme="light"] [class~="bg-[#111015]"],
+[data-studio-theme="light"] [class~="bg-[#100f14]"],
+[data-studio-theme="light"] [class~="bg-[#111016]"] {
+  background-color: #ffffff !important;
+}
+
+[data-studio-theme="light"] [class~="bg-[#0c0b0f]/92"] {
+  background-color: rgba(245, 242, 245, 0.94) !important;
+}
+
+[data-studio-theme="light"] [class~="text-white"],
+[data-studio-theme="light"] [class~="text-[#eeeaf2]"],
+[data-studio-theme="light"] [class~="text-[#ddd8e5]"],
+[data-studio-theme="light"] [class~="text-[#dcd7e3]"],
+[data-studio-theme="light"] [class~="text-[#c8c2cf]"] {
+  color: #302b34 !important;
+}
+
+[data-studio-theme="light"] [class~="text-[#77717f]"],
+[data-studio-theme="light"] [class~="text-[#8f8996]"],
+[data-studio-theme="light"] [class~="text-[#96909e]"],
+[data-studio-theme="light"] [class~="text-[#aaa4b4]"] {
+  color: #6e6672 !important;
+}
+
+[data-studio-theme="light"] [class~="bg-[#ef4f5f]"],
+[data-studio-theme="light"] [class~="bg-[#ef4f5f]"] [class~="text-white"] {
+  color: #ffffff !important;
+}
+
+[data-studio-theme="light"] [class~="bg-black/20"],
+[data-studio-theme="light"] [class~="bg-black/15"],
+[data-studio-theme="light"] [class~="bg-black/18"] {
+  background-color: rgba(48, 43, 52, 0.045) !important;
+}
+
+@media (max-width: 767px) {
+  .studio-editor {
+    min-height: 360px;
+  }
+}
+
+/* Writing 2.0 — SuperDoc is kept local and styled as part of the Studio. */
+.superdoc-writing-shell {
+  /* The DOCX page has a large intrinsic width. Without an explicit flex
+   * boundary it can enlarge its own parent indefinitely while zoom is read. */
+  width: 0;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  contain: inline-size layout paint;
+}
+
+.superdoc-writing-shell .superdoc-wrapper {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  color-scheme: light;
+  --sd-ui-font-family: var(--font-sans, Arial, Helvetica, sans-serif);
+  --sd-ui-bg: #17151d;
+  --sd-ui-text: #d8d3dd;
+  --sd-ui-text-muted: #8f8996;
+  --sd-ui-text-disabled: #625d69;
+  --sd-ui-action: #ef6977;
+  --sd-ui-action-hover: #ff7f8c;
+  --sd-ui-border: #34303b;
+  --sd-ui-hover-bg: #292630;
+  --sd-ui-active-bg: #44252d;
+  --sd-ui-disabled-bg: #201e25;
+  --sd-ui-toolbar-bg: #17151d;
+  --sd-ui-toolbar-button-text: #d8d3dd;
+  --sd-ui-toolbar-button-hover-bg: #292630;
+  --sd-ui-toolbar-button-active-bg: #44252d;
+  --sd-ui-ruler-bg: #151319;
+  --sd-ui-menu-bg: #1b1821;
+  --sd-ui-menu-text: #d8d3dd;
+  --sd-ui-menu-border: #34303b;
+  --sd-ui-menu-header-bg: #211e27;
+  --sd-ui-menu-item-hover-bg: #292630;
+  --sd-ui-menu-item-active-bg: #44252d;
+  --sd-ui-dropdown-bg: #1b1821;
+  --sd-ui-dropdown-text: #d8d3dd;
+  --sd-ui-dropdown-hover-bg: #292630;
+  --sd-ui-dropdown-active-bg: #44252d;
+  --sd-ui-surface-bg: #1b1821;
+  --sd-ui-surface-border: #34303b;
+  --sd-surface-canvas: #28252d;
+  --sd-layout-page-bg: #ffffff;
+}
+
+.superdoc-writing-shell .superdoc-toolbar-container {
+  position: relative;
+  z-index: 20;
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: #17151d;
+}
+
+.superdoc-writing-shell .superdoc-editor-container {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: #28252d;
+}
+
+.superdoc-writing-shell .superdoc,
+.superdoc-writing-shell .superdoc__layers,
+.superdoc-writing-shell .superdoc__document,
+.superdoc-writing-shell .superdoc__sub-document {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.superdoc-writing-shell .superdoc {
+  width: 100%;
+  overflow: hidden;
+}
+
+.superdoc-writing-shell .superdoc__layers {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-color: #5a5362 #201e25;
+}
+
+.superdoc-writing-shell .superdoc-page {
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.22);
+}
+
+@media print {
+  body.efs-printing-writing-document {
+    background: #fff !important;
+  }
+
+  body.efs-printing-writing-document * {
+    visibility: hidden !important;
+  }
+
+  body.efs-printing-writing-document .superdoc-writing-shell,
+  body.efs-printing-writing-document .superdoc-writing-shell * {
+    visibility: visible !important;
+  }
+
+  body.efs-printing-writing-document .superdoc-writing-shell {
+    position: absolute !important;
+    inset: 0 !important;
+    display: block !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  body.efs-printing-writing-document .superdoc-toolbar-container,
+  body.efs-printing-writing-document .superdoc-writing-status {
+    display: none !important;
+  }
+
+  body.efs-printing-writing-document .superdoc-editor-container {
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  body.efs-printing-writing-document .superdoc-page {
+    break-after: page;
+    box-shadow: none !important;
+  }
+}
