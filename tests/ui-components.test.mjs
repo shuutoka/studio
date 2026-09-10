@@ -322,3 +322,20 @@ test("ships the native SuperDoc writing workspace and embeds documents in EFS ba
   assert.match(writingDocument, /writing-docx/);
   assert.match(projectFile, /formatVersion:\s*7/);
 });
+
+test("keeps SuperDoc inside the Studio viewport without continuous fit-width feedback", async () => {
+  const workspace = await readFile(path.join(root, "components/studio/writing-workspace.tsx"), "utf8");
+  const editor = await readFile(path.join(root, "components/studio/superdoc-writing-editor.tsx"), "utf8");
+  const css = await readFile(path.join(root, "app/globals.css"), "utf8");
+
+  assert.match(workspace, /min-w-0 max-w-full flex-1 overflow-hidden/);
+  assert.match(editor, /w-0 min-w-0 max-w-full/);
+  assert.match(editor, /zoom=\{\{ initial: 90, mode: "manual" \}\}/);
+  assert.doesNotMatch(editor, /setMode\("fit-width"\)/);
+  assert.doesNotMatch(editor, /responsiveTo:\s*"container"/);
+  assert.match(editor, /comments:\s*false/);
+  assert.match(editor, /ruler:\s*false/);
+  assert.doesNotMatch(editor, /right:\s*\["ruler"/);
+  assert.match(css, /\.superdoc-writing-shell[\s\S]*contain: inline-size/);
+  assert.match(css, /--sd-ui-toolbar-bg: #17151d/);
+});

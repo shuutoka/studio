@@ -17,7 +17,6 @@ export type WritingDocumentSnapshot = {
 
 const STUDIO_SUPERDOC_UI = {
   toolbar: {
-    responsiveTo: "container" as const,
     overflow: "menu" as const,
     items: {
       left: ["undo", "redo", "search"] as const,
@@ -27,13 +26,17 @@ const STUDIO_SUPERDOC_UI = {
         "table", "table-actions", "text-align", "bullet-list", "numbered-list",
         "indent-decrease", "indent-increase", "line-height", "linked-style",
       ] as const,
-      right: ["ruler", "formatting-marks", "copy-format", "clear-formatting"] as const,
+      right: ["formatting-marks", "copy-format", "clear-formatting"] as const,
     },
     includeItems: ["formatting-marks", "table-of-contents"] as const,
     excludeItems: ["ai", "document-mode"] as const,
   },
   search: true,
-  ruler: true,
+  ruler: false,
+  comments: false,
+} as const;
+
+const STUDIO_SUPERDOC_MODULES = {
   comments: false,
 } as const;
 
@@ -142,8 +145,8 @@ export function SuperDocWritingEditor({
   }
 
   return (
-    <div ref={shellRef} className="superdoc-writing-shell relative flex min-h-0 flex-1 flex-col bg-[#28252d]">
-      <div className="superdoc-writing-status pointer-events-none absolute right-4 top-2 z-30 rounded-full border border-black/10 bg-white/90 px-2.5 py-1 text-[11px] font-medium text-[#4f4a54] shadow-sm">
+    <div ref={shellRef} className="superdoc-writing-shell relative flex w-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden bg-[#28252d]">
+      <div className="superdoc-writing-status pointer-events-none absolute bottom-3 right-4 z-30 rounded-full border border-white/10 bg-[#17151d]/95 px-2.5 py-1 text-[11px] font-medium text-[#aaa4b4] shadow-lg backdrop-blur">
         {!ready ? <span className="flex items-center gap-1.5"><LoaderCircle className="size-3 animate-spin" /> Ouverture du DOCX…</span>
           : saving ? <span className="flex items-center gap-1.5"><Save className="size-3" /> Enregistrement local…</span>
             : saved ? <span className="flex items-center gap-1.5 text-[#28754b]"><Check className="size-3" /> Enregistré localement</span>
@@ -155,13 +158,18 @@ export function SuperDocWritingEditor({
         documentMode="editing"
         role="editor"
         contained
+        measurementUnit="cm"
+        zoom={{ initial: 90, mode: "manual" }}
         ui={STUDIO_SUPERDOC_UI}
-        className="min-h-0 flex-1"
-        style={{ height: "100%", minHeight: 0 }}
+        modules={STUDIO_SUPERDOC_MODULES}
+        className="min-h-0 min-w-0 max-w-full flex-1 overflow-hidden"
+        style={{ height: "100%", minHeight: 0, width: "100%", maxWidth: "100%" }}
         renderLoading={() => <div className="grid h-full min-h-72 place-items-center text-sm text-[#8f8996]"><span className="flex items-center gap-2"><LoaderCircle className="size-4 animate-spin" /> Préparation des pages…</span></div>}
         onReady={({ superdoc }) => {
           setReady(true);
-          superdoc.ui.zoom.setMode("fit-width");
+          // Keep both zoom and toolbar layout out of continuous ResizeObserver
+          // feedback loops. The overflow menu handles narrow workspaces.
+          superdoc.ui.zoom.set(90);
           window.setTimeout(() => void capture(), 120);
         }}
         onEditorUpdate={scheduleCapture}

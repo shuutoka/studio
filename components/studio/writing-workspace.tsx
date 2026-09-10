@@ -199,7 +199,7 @@ export function WritingWorkspace({
 
   return (
     <div
-      className={`writing-workspace flex min-h-0 flex-1 flex-col overflow-hidden bg-[#0c0b0f] ${focusMode ? "fixed inset-0 z-50" : ""}`}
+      className={`writing-workspace flex min-h-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden bg-[#0c0b0f] ${focusMode ? "fixed inset-0 z-50 w-full" : "w-full"}`}
       style={focusMode ? undefined : { height: normalWorkspaceHeight, maxHeight: normalWorkspaceHeight }}
     >
       <header className="shrink-0 border-b border-white/8 bg-[#121117]">
@@ -228,7 +228,7 @@ export function WritingWorkspace({
         </Tabs>
       </header>
 
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
         {!focusMode && <aside className="hidden w-64 shrink-0 overflow-y-auto border-r border-white/8 bg-[#100f14] p-2 lg:block"><div className="mb-2 flex items-center gap-2 px-2 py-2 text-[11px] font-semibold uppercase tracking-[.14em] text-[#77717f]"><ListTree className="size-3.5" /> Plan DOCX</div><OutlinePanel project={project} activeVolumeId={activeVolume?.id ?? null} outlines={outlines} collapsedVolumes={collapsedVolumes} setCollapsedVolumes={setCollapsedVolumes} onSelectVolume={selectVolume} onNavigate={navigateToHeading} /></aside>}
         {!activeVolume ? <EmptyWriting onAdd={addVolume} />
           : documentBlob ? <SuperDocWritingEditor
