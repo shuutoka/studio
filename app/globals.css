@@ -400,7 +400,7 @@ textarea {
   }
 }
 
-/* Writing 2.0 — SuperDoc is kept local and styled as part of the Studio. */
+/* Writing 2.1 — SuperDoc is kept local and styled as part of the Studio. */
 .superdoc-writing-shell {
   /* The DOCX page has a large intrinsic width. Without an explicit flex
    * boundary it can enlarge its own parent indefinitely while zoom is read. */
@@ -409,6 +409,7 @@ textarea {
   max-width: 100%;
   overflow: hidden;
   contain: inline-size;
+  background: #28252d;
 }
 
 .superdoc-writing-shell .superdoc-wrapper {
@@ -419,7 +420,7 @@ textarea {
   min-height: 0;
   height: 100%;
   overflow: hidden;
-  color-scheme: light;
+  color-scheme: dark;
   --sd-ui-font-family: var(--font-sans, Arial, Helvetica, sans-serif);
   --sd-ui-bg: #17151d;
   --sd-ui-text: #d8d3dd;
@@ -449,7 +450,7 @@ textarea {
   --sd-ui-surface-bg: #1b1821;
   --sd-ui-surface-border: #34303b;
   --sd-surface-canvas: #28252d;
-  --sd-layout-page-bg: #ffffff;
+  --sd-layout-page-bg: var(--efs-paper-background, #ffffff);
 }
 
 .superdoc-writing-shell .superdoc-toolbar-container {
@@ -495,7 +496,61 @@ textarea {
 }
 
 .superdoc-writing-shell .superdoc-page {
+  margin-inline: auto !important;
+  background: var(--efs-paper-background, #ffffff) !important;
   box-shadow: 0 10px 32px rgba(0, 0, 0, 0.22);
+}
+
+.superdoc-writing-shell[data-paper-color-mode="dark"] .superdoc-page {
+  color: #eeeaf2;
+}
+
+.superdoc-writing-shell.writing-theme-light {
+  background: #e8e5ea;
+}
+
+.superdoc-writing-shell.writing-theme-light .superdoc-wrapper {
+  color-scheme: light;
+  --sd-ui-bg: #f8f6f9;
+  --sd-ui-text: #302b34;
+  --sd-ui-text-muted: #6e6672;
+  --sd-ui-text-disabled: #a49da8;
+  --sd-ui-border: #d8d2da;
+  --sd-ui-hover-bg: #eee9ef;
+  --sd-ui-active-bg: #f9dfe2;
+  --sd-ui-disabled-bg: #eee9ef;
+  --sd-ui-toolbar-bg: #f8f6f9;
+  --sd-ui-toolbar-button-text: #403944;
+  --sd-ui-toolbar-button-hover-bg: #eee9ef;
+  --sd-ui-toolbar-button-active-bg: #f9dfe2;
+  --sd-ui-menu-bg: #ffffff;
+  --sd-ui-menu-text: #302b34;
+  --sd-ui-menu-border: #d8d2da;
+  --sd-ui-menu-header-bg: #f3eff4;
+  --sd-ui-menu-item-hover-bg: #eee9ef;
+  --sd-ui-menu-item-active-bg: #f9dfe2;
+  --sd-ui-dropdown-bg: #ffffff;
+  --sd-ui-dropdown-text: #302b34;
+  --sd-ui-dropdown-hover-bg: #eee9ef;
+  --sd-ui-dropdown-active-bg: #f9dfe2;
+  --sd-ui-surface-bg: #ffffff;
+  --sd-ui-surface-border: #d8d2da;
+  --sd-surface-canvas: #e8e5ea;
+}
+
+.superdoc-writing-shell.writing-theme-light .superdoc-toolbar-container {
+  border-bottom-color: rgba(48, 43, 52, 0.12);
+  background: #f8f6f9;
+}
+
+.superdoc-writing-shell.writing-theme-light .superdoc-editor-container {
+  background: #e8e5ea;
+}
+
+.superdoc-writing-shell.writing-theme-light .superdoc-writing-status {
+  border-color: rgba(48, 43, 52, 0.12);
+  background: rgba(255, 255, 255, 0.95);
+  color: #6e6672;
 }
 
 @media print {

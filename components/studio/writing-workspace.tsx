@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import {
   SuperDocWritingEditor, type WritingDocumentSnapshot,
 } from "@/components/studio/superdoc-writing-editor";
+import { WritingDocumentControls } from "@/components/studio/writing-document-controls";
 import { WritingExportButton } from "@/components/studio/writing-export-button";
 import { WritingImportButton } from "@/components/studio/writing-import-button";
 import {
@@ -28,6 +29,8 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { deleteMedia } from "@/lib/studio-db";
+import { getActiveWritingDocument } from "@/lib/writing-editor-registry";
+import { ensureStudioDocxStyles } from "@/lib/writing-docx";
 import { loadOrCreateWritingDocument, persistWritingDocument } from "@/lib/writing-document";
 import { writingDocumentMediaId } from "@/lib/writing-document-id";
 import {
@@ -89,6 +92,11 @@ export function WritingWorkspace({
     setDocumentBlob(null);
     setDocumentError("");
     loadOrCreateWritingDocument(project, activeVolume.id)
+      .then(async (blob) => {
+        const styledBlob = await ensureStudioDocxStyles(blob);
+        if (styledBlob !== blob) await persistWritingDocument(project.id, activeVolume.id, activeVolume.title, styledBlob);
+        return styledBlob;
+      })
       .then((blob) => { if (!cancelled) setDocumentBlob(blob); })
       .catch((error) => {
         if (cancelled) return;
@@ -186,6 +194,33 @@ export function WritingWorkspace({
       volume.documentText = snapshot.text;
       volume.documentHtml = snapshot.html;
       volume.documentPageCount = snapshot.pageCount;
+      volume.documentOutline = snapshot.outline;
+    });
+  }
+
+  function updateVolumeStatus(status: StudioVolume["status"]) {
+    if (!activeVolume) return;
+    updateProject((draft) => {
+      const volume = draft.volumes.find((candidate) => candidate.id === activeVolume.id);
+      if (volume) volume.status = status;
+    });
+  }
+
+  function insertIntoDocument(text: string) {
+    if (!activeVolume) return false;
+    return getActiveWritingDocument(activeVolume.id)?.insertText(text) ?? false;
+  }
+
+  async function applyVolumeFooter(type: StudioVolume["footerType"], text: string) {
+    if (!activeVolume) throw new Error("Aucun volume n’est ouvert.");
+    const activeDocument = getActiveWritingDocument(activeVolume.id);
+    if (!activeDocument) throw new Error("Attendez que le document soit complètement ouvert.");
+    await activeDocument.applyFooter(type, text);
+    updateProject((draft) => {
+      const volume = draft.volumes.find((candidate) => candidate.id === activeVolume.id);
+      if (!volume) return;
+      volume.footerType = type;
+      volume.footerText = text;
     });
   }
 
@@ -204,7 +239,7 @@ export function WritingWorkspace({
     >
       <header className="shrink-0 border-b border-white/8 bg-[#121117]">
         <div className="flex min-h-12 items-center gap-3 px-4 py-2 sm:px-5">
-          <div className="min-w-0"><p className="truncate text-sm font-semibold text-white">{activeVolume?.title ?? "Espace d’écriture 2.0"}</p><p className="text-[11px] text-[#6f6976]">{project.name} · document DOCX natif</p></div>
+          <div className="min-w-0"><p className="truncate text-sm font-semibold text-white">{activeVolume?.title ?? "Espace d’écriture 2.1"}</p><p className="text-[11px] text-[#6f6976]">{project.name} · document DOCX natif</p></div>
           <div className="ml-auto flex min-w-0 items-center gap-2">
             <div className="hidden items-center gap-1.5 overflow-x-auto sm:flex">{(Object.keys(counterLabels) as WritingCounterKey[]).filter((key) => settings.writingCounters[key]).map((key) => <Counter key={key} label={counterLabels[key]} value={documentStats[key]} />)}</div>
             <CounterSettings settings={settings} updateSettings={updateSettings} />
@@ -226,6 +261,18 @@ export function WritingWorkspace({
             <Button aria-label="Ajouter un volume" title="Ajouter un volume" size="icon-xs" variant="ghost" className="shrink-0" onClick={addVolume}><Plus /></Button>
           </div>
         </Tabs>
+        {activeVolume && <WritingDocumentControls
+          volume={activeVolume}
+          settings={settings}
+          onStatusChange={updateVolumeStatus}
+          onThemeChange={(theme) => updateSettings((draft) => { draft.writingTheme = theme; })}
+          onPaperModeChange={(mode) => updateSettings((draft) => {
+            draft.paperColorMode = mode;
+            draft.paperBackground = mode === "light" ? "#ffffff" : "#15131a";
+          })}
+          onInsert={insertIntoDocument}
+          onApplyFooter={applyVolumeFooter}
+        />}
       </header>
 
       <div className="flex min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
@@ -235,6 +282,7 @@ export function WritingWorkspace({
             key={activeVolume.id}
             projectId={project.id}
             volume={activeVolume}
+            settings={settings}
             documentBlob={documentBlob}
             navigationTarget={navigationTarget}
             onSnapshot={applySnapshot}
@@ -281,6 +329,9 @@ function OutlinePanel({ project, activeVolumeId, outlines, collapsedVolumes, set
 }
 
 function extractOutline(volume: StudioVolume): OutlineEntry[] {
+  if (volume.documentOutline.length) {
+    return volume.documentOutline.map((entry, headingIndex) => ({ ...entry, headingIndex }));
+  }
   const html = volume.documentHtml || getVolumePages(volume).map((page) => page.content).join("\n");
   const entries: OutlineEntry[] = [];
   const pattern = /<h([1-4])(?:\s[^>]*)?>([\s\S]*?)<\/h\1>/gi;

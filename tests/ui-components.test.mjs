@@ -122,12 +122,16 @@ test("migrates the former cream paper and page footer settings", async () => {
   legacyProject.schemaVersion = 3;
   delete legacyProject.footerType;
   delete legacyProject.footerText;
+  delete legacyProject.volumes[0].footerType;
+  delete legacyProject.volumes[0].footerText;
   legacyProject.volumes[0].chapters[0].pages[0].footerType = "custom";
   legacyProject.volumes[0].chapters[0].pages[0].footerText = "Brouillon confidentiel";
 
   const normalizedProject = normalizeProject(legacyProject);
   assert.equal(normalizedProject.footerType, "custom");
   assert.equal(normalizedProject.footerText, "Brouillon confidentiel");
+  assert.equal(normalizedProject.volumes[0].footerType, "custom");
+  assert.equal(normalizedProject.volumes[0].footerText, "Brouillon confidentiel");
   assert.equal(normalizedProject.volumes[0].chapters[0].pages[0].ignoreProjectFooter, false);
 });
 
@@ -209,7 +213,7 @@ test("creates and migrates persistent story boards", async () => {
   project.boards[0].folderId = "folder-timeline";
 
   const normalized = normalizeProject(project);
-  assert.equal(normalized.schemaVersion, 7);
+  assert.equal(normalized.schemaVersion, 8);
   assert.equal(normalized.boards[0].name, "Ligne temporelle");
   assert.equal(normalized.boards[0].nodes.length, 2);
   assert.equal(normalized.boards[0].edges[0].label, "Puis");
@@ -320,7 +324,7 @@ test("ships the native SuperDoc writing workspace and embeds documents in EFS ba
   assert.match(superdocEditor, /"ai"/);
   assert.match(superdocEditor, /persistWritingDocument/);
   assert.match(writingDocument, /writing-docx/);
-  assert.match(projectFile, /formatVersion:\s*7/);
+  assert.match(projectFile, /formatVersion:\s*8/);
 });
 
 test("keeps SuperDoc inside the Studio viewport without continuous fit-width feedback", async () => {
@@ -338,4 +342,37 @@ test("keeps SuperDoc inside the Studio viewport without continuous fit-width fee
   assert.doesNotMatch(editor, /right:\s*\["ruler"/);
   assert.match(css, /\.superdoc-writing-shell[\s\S]*contain: inline-size/);
   assert.match(css, /--sd-ui-toolbar-bg: #17151d/);
+});
+
+test("reconnects Writing 2.1 to Studio preferences and native DOCX metadata", async () => {
+  const { createBlankProject, createDefaultSettings, normalizeProject, normalizeSettings } = await vite.ssrLoadModule("/lib/studio.ts");
+  const workspace = await readFile(path.join(root, "components/studio/writing-workspace.tsx"), "utf8");
+  const editor = await readFile(path.join(root, "components/studio/superdoc-writing-editor.tsx"), "utf8");
+  const controls = await readFile(path.join(root, "components/studio/writing-document-controls.tsx"), "utf8");
+  const docx = await readFile(path.join(root, "lib/writing-docx.ts"), "utf8");
+  const css = await readFile(path.join(root, "app/globals.css"), "utf8");
+
+  const settings = normalizeSettings({ ...createDefaultSettings(), schemaVersion: 1 });
+  const project = normalizeProject({ ...createBlankProject("Migration 2.1", "novel"), schemaVersion: 7 });
+  assert.equal(settings.schemaVersion, 7);
+  assert.equal(settings.writingTheme, "follow");
+  assert.equal(project.schemaVersion, 8);
+  assert.equal(project.volumes[0].status, "draft");
+  assert.deepEqual(project.volumes[0].documentOutline, []);
+
+  assert.match(editor, /fontOptions/);
+  assert.match(editor, /settings\.quoteStyle/);
+  assert.match(editor, /settings\.characterShortcuts/);
+  assert.match(editor, /efs\.insert-page-break/);
+  assert.match(controls, /Tiret cadratin/);
+  assert.match(controls, /Caractères spéciaux/);
+  assert.match(controls, /Pied de page du volume/);
+  assert.match(controls, /Mode clair/);
+  assert.match(workspace, /volume\.documentOutline = snapshot\.outline/);
+  assert.match(workspace, /ensureStudioDocxStyles/);
+  assert.match(docx, /extractDocxOutline/);
+  assert.match(docx, /applyDocxFooter/);
+  assert.match(docx, /w:styleId="Chapter"/);
+  assert.match(css, /\.superdoc-writing-shell \.superdoc-page[\s\S]*margin-inline: auto !important/);
+  assert.doesNotMatch(editor, /ruler:\s*true/);
 });

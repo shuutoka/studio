@@ -126,8 +126,8 @@ function createManuscript(project: StudioProject, volumeId: string): Manuscript 
     projectName: project.name,
     volume,
     pages,
-    footerType: project.footerType,
-    footerText: project.footerText,
+    footerType: volume.footerType ?? project.footerType,
+    footerText: volume.footerText ?? project.footerText,
   };
 }
 
@@ -206,10 +206,11 @@ function buildDocx(manuscript: Manuscript) {
   ].join("");
   const footerContentTypes = manuscript.pages.map((_, index) => `<Override PartName="/word/footer${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>`).join("");
   const archiveFiles: Record<string, Uint8Array> = {
-    "[Content_Types].xml": strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${imageContentTypes}<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>${footerContentTypes}</Types>`),
+    "[Content_Types].xml": strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${imageContentTypes}<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>${footerContentTypes}</Types>`),
     "_rels/.rels": strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`),
-    "word/_rels/document.xml.rels": strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${documentRelationships}</Relationships>`),
+    "word/_rels/document.xml.rels": strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>${documentRelationships}</Relationships>`),
     "word/document.xml": strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>${pageXml}${finalSection}</w:body></w:document>`),
+    "word/styles.xml": strToU8(docxStylesXml()),
   };
   embeddedImages.forEach((image) => { archiveFiles[`word/media/${image.name}`] = image.bytes; });
   manuscript.pages.forEach((item, index) => {
@@ -261,10 +262,11 @@ function docxContainerParagraphs(container: ParentNode, images: Map<string, Embe
       paragraphs.push(...docxContainerParagraphs(node, images));
     } else {
       const headingSize = node.tagName === "H1" ? 32 : node.tagName === "H2" ? 28 : node.tagName === "H3" ? 24 : node.tagName === "H4" ? 22 : undefined;
+      const paragraphStyle = node.tagName === "H1" ? "Heading1" : node.tagName === "H2" ? "Heading2" : node.tagName === "H3" ? "Heading3" : node.tagName === "H4" ? "Heading4" : undefined;
       const element = node as HTMLElement;
       const alignment = docxAlignment(element.style.textAlign);
       const indent = node.tagName === "BLOCKQUOTE" ? 360 : cssIndentTwips(element.style.marginLeft || element.style.paddingLeft);
-      paragraphs.push(docxParagraph([...node.childNodes], { bold: Boolean(headingSize), size: headingSize }, "120", alignment, "", indent, images));
+      paragraphs.push(docxParagraph([...node.childNodes], { bold: Boolean(headingSize), size: headingSize }, "120", alignment, "", indent, images, paragraphStyle));
     }
   });
   flushInline();
@@ -279,8 +281,9 @@ function docxParagraph(
   prefix = "",
   indent = 0,
   images = new Map<string, EmbeddedImage>(),
+  paragraphStyle?: string,
 ) {
-  const paragraphProperties = `<w:pPr><w:spacing w:after="${spacingAfter}"/>${alignment ? `<w:jc w:val="${alignment}"/>` : ""}${indent ? `<w:ind w:left="${indent}"/>` : ""}</w:pPr>`;
+  const paragraphProperties = `<w:pPr>${paragraphStyle ? `<w:pStyle w:val="${paragraphStyle}"/>` : ""}<w:spacing w:after="${spacingAfter}"/>${alignment ? `<w:jc w:val="${alignment}"/>` : ""}${indent ? `<w:ind w:left="${indent}"/>` : ""}</w:pPr>`;
   const prefixRun = prefix ? docxTextRun(prefix, baseStyle) : "";
   return `<w:p>${paragraphProperties}${prefixRun}${nodes.map((node) => docxRuns(node, baseStyle, images)).join("")}</w:p>`;
 }
@@ -499,6 +502,10 @@ function normalizeExportColor(value: string) {
   const rgb = value.match(/^rgba?\(\s*(\d+)\D+(\d+)\D+(\d+)/i);
   if (!rgb) return "";
   return rgb.slice(1, 4).map((channel) => Math.min(255, Number(channel)).toString(16).padStart(2, "0")).join("").toUpperCase();
+}
+
+function docxStylesXml() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="120" w:line="360" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style><w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Titre"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:jc w:val="center"/><w:spacing w:before="240" w:after="240"/></w:pPr><w:rPr><w:b/><w:sz w:val="40"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Subtitle"><w:name w:val="Sous-titre"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:jc w:val="center"/><w:spacing w:after="240"/></w:pPr><w:rPr><w:i/><w:color w:val="666666"/><w:sz w:val="28"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Chapter"><w:name w:val="Chapitre"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:pageBreakBefore/><w:keepNext/><w:jc w:val="center"/><w:outlineLvl w:val="0"/><w:spacing w:before="360" w:after="360"/></w:pPr><w:rPr><w:b/><w:sz w:val="36"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="Titre 1"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:outlineLvl w:val="0"/><w:spacing w:before="240" w:after="120"/></w:pPr><w:rPr><w:b/><w:sz w:val="32"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="Titre 2"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:outlineLvl w:val="1"/><w:spacing w:before="200" w:after="100"/></w:pPr><w:rPr><w:b/><w:sz w:val="28"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="Titre 3"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:outlineLvl w:val="2"/><w:spacing w:before="160" w:after="80"/></w:pPr><w:rPr><w:b/><w:sz w:val="24"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Heading4"><w:name w:val="Titre 4"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:outlineLvl w:val="3"/></w:pPr><w:rPr><w:b/></w:rPr></w:style></w:styles>`;
 }
 
 function docxPageSize(format: PageFormat) {

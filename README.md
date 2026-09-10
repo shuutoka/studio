@@ -10,7 +10,9 @@ globale `.efs` ou `.zip`.
 - types de projet : manga/BD, roman, script et écriture libre, avec surcharge par page ;
 - volumes et chapitres structurés dans de véritables documents DOCX ;
 - pagination, sections, marges, en-têtes, pieds de page, tableaux et images gérés par SuperDoc ;
-- éditeur DOCX natif : styles de titres, polices, tailles, mise en forme, couleurs, listes, recherche et règle ;
+- éditeur DOCX natif : styles Titre, Sous-titre, Chapitre et Titre 1 à 4, polices du Studio, tailles, mise en forme, couleurs, listes et recherche ;
+- feuille centrée, thème d’écriture clair/sombre, fond de feuille clair/sombre, état du manuscrit et pied de page par volume ;
+- guillemets, raccourcis, tiret cadratin et palette de caractères spéciaux reliés aux paramètres du Studio ;
 - ajout de polices personnalisées TTF, OTF, WOFF et WOFF2 ;
 - fiches de personnages avancées avec recherche, tags, images réordonnables, portrait principal, tenues et relations ;
 - images importées optimisées en WebP, carrousel et visionneuse en grille, liste, image ou texte ;
@@ -107,6 +109,7 @@ enfer-fatal-studio.efs
 
 Le fichier `.efs` est une archive ZIP non compressée portant une extension propre
 au Studio. Le format porte un numéro de version afin de permettre les migrations
-futures. La version 7 ajoute les DOCX natifs des volumes. Les anciennes archives
+futures. La version 8 ajoute les métadonnées de volume de l’espace d’écriture 2.1
+(état, pied de page et plan DOCX). Les anciennes archives
 `.efstudio.zip` et les sauvegardes EFS antérieures restent importables ; les
 anciens manuscrits HTML sont convertis à leur première ouverture.

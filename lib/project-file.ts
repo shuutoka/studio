@@ -86,7 +86,7 @@ export async function createStudioBackup(
   const savedSettings = { ...settings, savedRevision: settings.revision };
   const manifest = {
     format: "enfer-fatal-studio-backup",
-    formatVersion: 7,
+    formatVersion: 8,
     exportedAt: new Date().toISOString(),
     projectCount: savedProjects.length,
     media: manifestMedia,

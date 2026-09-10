@@ -1,30 +1,33 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, LoaderCircle, Save } from "lucide-react";
 import { SuperDocEditor, type SuperDocRef } from "@superdoc/react";
 import "@superdoc/react/style.css";
 
+import { isSingleKeyShortcut, matchesShortcut } from "@/lib/shortcuts";
+import { applyDocxFooter, extractDocxOutline } from "@/lib/writing-docx";
 import { registerActiveWritingDocument } from "@/lib/writing-editor-registry";
 import { persistWritingDocument } from "@/lib/writing-document";
-import type { StudioVolume } from "@/lib/studio";
+import { STANDARD_FONTS, type StudioSettings, type StudioVolume } from "@/lib/studio";
 
 export type WritingDocumentSnapshot = {
   text: string;
   html: string;
   pageCount: number;
+  outline: Array<{ level: number; label: string }>;
 };
 
 const STUDIO_SUPERDOC_UI = {
   toolbar: {
     overflow: "menu" as const,
     items: {
-      left: ["undo", "redo", "search"] as const,
+      left: ["undo", "redo", "search", "linked-style"] as const,
       center: [
         "zoom", "font-family", "font-size", "bold", "italic", "underline",
         "strikethrough", "text-color", "highlight-color", "link", "image",
         "table", "table-actions", "text-align", "bullet-list", "numbered-list",
-        "indent-decrease", "indent-increase", "line-height", "linked-style",
+        "indent-decrease", "indent-increase", "line-height",
       ] as const,
       right: ["formatting-marks", "copy-format", "clear-formatting"] as const,
     },
@@ -32,17 +35,18 @@ const STUDIO_SUPERDOC_UI = {
     excludeItems: ["ai", "document-mode"] as const,
   },
   search: true,
+  // En mode contenu, la règle crée une boucle ResizeObserver qui déplace le canevas.
   ruler: false,
   comments: false,
 } as const;
 
-const STUDIO_SUPERDOC_MODULES = {
-  comments: false,
-} as const;
+const STUDIO_SUPERDOC_MODULES = { comments: false } as const;
+const doublePressDelay = 450;
 
 export function SuperDocWritingEditor({
   projectId,
   volume,
+  settings,
   documentBlob,
   navigationTarget,
   onSnapshot,
@@ -50,6 +54,7 @@ export function SuperDocWritingEditor({
 }: {
   projectId: string;
   volume: StudioVolume;
+  settings: StudioSettings;
   documentBlob: Blob;
   navigationTarget?: { text: string; token: number } | null;
   onSnapshot: (snapshot: WritingDocumentSnapshot) => void;
@@ -59,16 +64,50 @@ export function SuperDocWritingEditor({
   const shellRef = useRef<HTMLDivElement>(null);
   const saveTimerRef = useRef<number | null>(null);
   const captureQueueRef = useRef(Promise.resolve());
+  const commandCleanupRef = useRef<Array<() => void>>([]);
+  const insertTextRef = useRef<(text: string) => boolean>(() => false);
+  const insertPageBreakRef = useRef<() => boolean>(() => false);
   const latestTextRef = useRef(volume.documentText);
+  const nextFrenchQuoteIsOpening = useRef(true);
+  const pendingDoublePress = useRef<{ shortcut: string; fallback: string; timer: number } | null>(null);
   const lastMetadataRef = useRef({
     text: volume.documentText,
     html: volume.documentHtml,
     pageCount: volume.documentPageCount,
+    outline: JSON.stringify(volume.documentOutline),
     engine: volume.documentEngine,
   });
   const [ready, setReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  const fontOptions = useMemo(() => [
+    ...STANDARD_FONTS
+      .filter((font) => settings.enabledStandardFonts.includes(font.id))
+      .map((font) => ({ value: font.family, label: font.label, previewFamily: font.family })),
+    ...settings.systemFonts
+      .filter((font) => font.enabled)
+      .map((font) => ({ value: font.family, label: font.name, previewFamily: font.family })),
+    ...settings.customFonts
+      .filter((font) => font.enabled)
+      .map((font) => ({ value: font.family, label: font.name, previewFamily: font.family })),
+  ], [settings.customFonts, settings.enabledStandardFonts, settings.systemFonts]);
+
+  const editorUi = useMemo(() => ({
+    ...STUDIO_SUPERDOC_UI,
+    toolbar: {
+      ...STUDIO_SUPERDOC_UI.toolbar,
+      fontOptions,
+      strings: {
+        "linked-style": "Styles de texte",
+        "linked-style-label": "Style",
+      },
+    },
+  }), [fontOptions]);
+
+  const writingTheme = settings.writingTheme === "follow"
+    ? settings.theme === "light" ? "light" : "dark"
+    : settings.writingTheme;
 
   const capture = useCallback(async () => {
     const instance = editorRef.current?.getInstance();
@@ -80,16 +119,18 @@ export function SuperDocWritingEditor({
       const html = normalizeEditorHtml(rawHtml);
       const text = instance.ui.document.getText() ?? plainTextFromHtml(html);
       const pageCount = Math.max(1, shellRef.current?.querySelectorAll(".superdoc-page").length ?? 1);
+      const outline = await extractDocxOutline(blob).catch(() => volume.documentOutline);
+      const serializedOutline = JSON.stringify(outline);
       latestTextRef.current = text;
       await persistWritingDocument(projectId, volume.id, volume.title, blob);
 
       const previous = lastMetadataRef.current;
       if (
-        previous.engine !== "superdoc" || previous.text !== text ||
-        previous.html !== html || previous.pageCount !== pageCount
+        previous.engine !== "superdoc" || previous.text !== text || previous.html !== html ||
+        previous.pageCount !== pageCount || previous.outline !== serializedOutline
       ) {
-        lastMetadataRef.current = { text, html, pageCount, engine: "superdoc" };
-        onSnapshot({ text, html, pageCount });
+        lastMetadataRef.current = { text, html, pageCount, outline: serializedOutline, engine: "superdoc" };
+        onSnapshot({ text, html, pageCount, outline });
       }
       setSaved(true);
       window.setTimeout(() => setSaved(false), 1_500);
@@ -97,7 +138,7 @@ export function SuperDocWritingEditor({
       onError(error instanceof Error ? error.message : "Le document n’a pas pu être enregistré localement.");
     }).finally(() => setSaving(false));
     await captureQueueRef.current;
-  }, [onError, onSnapshot, projectId, volume.id, volume.title]);
+  }, [onError, onSnapshot, projectId, volume.documentOutline, volume.id, volume.title]);
 
   const scheduleCapture = useCallback(() => {
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
@@ -106,7 +147,11 @@ export function SuperDocWritingEditor({
 
   useEffect(() => () => {
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    if (pendingDoublePress.current) window.clearTimeout(pendingDoublePress.current.timer);
+    commandCleanupRef.current.forEach((cleanup) => cleanup());
   }, []);
+
+  useEffect(() => { nextFrenchQuoteIsOpening.current = true; }, [settings.quoteStyle]);
 
   useEffect(() => {
     if (!ready) return;
@@ -124,8 +169,19 @@ export function SuperDocWritingEditor({
         instance?.focus();
         instance?.ui.search.find(text, { caseSensitive: false });
       },
+      insertText: (text) => insertTextRef.current(text),
+      insertPageBreak: () => insertPageBreakRef.current(),
+      applyFooter: async (type, text) => {
+        const instance = editorRef.current?.getInstance();
+        if (!instance) throw new Error("L’éditeur n’est pas prêt.");
+        const blob = await instance.export({ exportType: ["docx"], triggerDownload: false });
+        const updated = await applyDocxFooter(blob, type, text);
+        await Promise.resolve(instance.ui.document.replaceFile(updated));
+        await persistWritingDocument(projectId, volume.id, volume.title, updated);
+        window.setTimeout(() => void capture(), 120);
+      },
     });
-  }, [capture, ready, volume.id]);
+  }, [capture, projectId, ready, volume.id, volume.title]);
 
   useEffect(() => {
     if (!ready || !navigationTarget?.text) return;
@@ -133,6 +189,95 @@ export function SuperDocWritingEditor({
     instance?.focus();
     instance?.ui.search.find(navigationTarget.text, { caseSensitive: false });
   }, [navigationTarget, ready]);
+
+  function configureCommands(superdoc: NonNullable<ReturnType<SuperDocRef["getInstance"]>>) {
+    commandCleanupRef.current.forEach((cleanup) => cleanup());
+    const textCommand = superdoc.ui.commands.register<string>({
+      id: "efs.insert-text",
+      execute: ({ insertText, payload }) => insertText(typeof payload === "string" ? payload : ""),
+    });
+    const pageBreakCommand = superdoc.ui.commands.register({
+      id: "efs.insert-page-break",
+      execute: ({ doc, selection }) => {
+        const insert = doc?.insert;
+        if (typeof insert !== "function") return false;
+        const point = selection.selectionTarget?.start;
+        const blockId = point?.kind === "text" ? point.blockId : undefined;
+        return insert.call(doc, {
+          ...(blockId ? {
+            target: { kind: "block", nodeType: "paragraph", nodeId: blockId },
+            placement: "after",
+          } : {}),
+          content: { kind: "break", break: { type: "page" } },
+        });
+      },
+    });
+    commandCleanupRef.current = [textCommand, pageBreakCommand];
+    insertTextRef.current = (text) => {
+      superdoc.focus();
+      textCommand.handle.execute(text);
+      scheduleCapture();
+      return true;
+    };
+    insertPageBreakRef.current = () => {
+      superdoc.focus();
+      pageBreakCommand.handle.execute();
+      scheduleCapture();
+      return true;
+    };
+  }
+
+  function flushPendingDoublePress() {
+    const pending = pendingDoublePress.current;
+    if (!pending) return;
+    window.clearTimeout(pending.timer);
+    pendingDoublePress.current = null;
+    insertTextRef.current(pending.fallback);
+  }
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.nativeEvent.isComposing || event.repeat) return;
+    const binding = settings.characterShortcuts.find((item) => item.shortcut && matchesShortcut(event, item.shortcut));
+    if (pendingDoublePress.current && pendingDoublePress.current.shortcut !== binding?.shortcut) flushPendingDoublePress();
+    if (matchesShortcut(event, settings.shortcuts.pageBreak)) {
+      event.preventDefault();
+      insertPageBreakRef.current();
+      return;
+    }
+    if (matchesShortcut(event, settings.shortcuts.emDash)) {
+      event.preventDefault();
+      insertTextRef.current("—");
+      return;
+    }
+    if (binding && (binding.pressMode === "single" || !isSingleKeyShortcut(binding.shortcut))) {
+      event.preventDefault();
+      insertTextRef.current(binding.character);
+      return;
+    }
+    if (binding?.pressMode === "double") {
+      event.preventDefault();
+      const pending = pendingDoublePress.current;
+      if (pending?.shortcut === binding.shortcut) {
+        window.clearTimeout(pending.timer);
+        pendingDoublePress.current = null;
+        insertTextRef.current(binding.character);
+      } else {
+        const fallback = event.key.length === 1 ? event.key : "";
+        const timer = window.setTimeout(() => {
+          if (pendingDoublePress.current?.shortcut !== binding.shortcut) return;
+          pendingDoublePress.current = null;
+          insertTextRef.current(fallback);
+        }, doublePressDelay);
+        pendingDoublePress.current = { shortcut: binding.shortcut, fallback, timer };
+      }
+      return;
+    }
+    if (event.key === '"' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      event.preventDefault();
+      insertTextRef.current(settings.quoteStyle === "straight" ? '"' : nextFrenchQuoteIsOpening.current ? "« " : " »");
+      if (settings.quoteStyle === "french") nextFrenchQuoteIsOpening.current = !nextFrenchQuoteIsOpening.current;
+    }
+  }
 
   function printEditor() {
     if (!shellRef.current) return false;
@@ -145,7 +290,13 @@ export function SuperDocWritingEditor({
   }
 
   return (
-    <div ref={shellRef} className="superdoc-writing-shell relative flex w-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden bg-[#28252d]">
+    <div
+      ref={shellRef}
+      className={`superdoc-writing-shell writing-theme-${writingTheme} relative flex w-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden`}
+      data-paper-color-mode={settings.paperColorMode}
+      style={{ "--efs-paper-background": settings.paperBackground } as React.CSSProperties}
+      onKeyDownCapture={handleKeyDown}
+    >
       <div className="superdoc-writing-status pointer-events-none absolute bottom-3 right-4 z-30 rounded-full border border-white/10 bg-[#17151d]/95 px-2.5 py-1 text-[11px] font-medium text-[#aaa4b4] shadow-lg backdrop-blur">
         {!ready ? <span className="flex items-center gap-1.5"><LoaderCircle className="size-3 animate-spin" /> Ouverture du DOCX…</span>
           : saving ? <span className="flex items-center gap-1.5"><Save className="size-3" /> Enregistrement local…</span>
@@ -160,15 +311,15 @@ export function SuperDocWritingEditor({
         contained
         measurementUnit="cm"
         zoom={{ initial: 90, mode: "manual" }}
-        ui={STUDIO_SUPERDOC_UI}
+        ui={editorUi}
         modules={STUDIO_SUPERDOC_MODULES}
         className="min-h-0 min-w-0 max-w-full flex-1 overflow-hidden"
         style={{ height: "100%", minHeight: 0, width: "100%", maxWidth: "100%" }}
         renderLoading={() => <div className="grid h-full min-h-72 place-items-center text-sm text-[#8f8996]"><span className="flex items-center gap-2"><LoaderCircle className="size-4 animate-spin" /> Préparation des pages…</span></div>}
         onReady={({ superdoc }) => {
+          configureCommands(superdoc);
           setReady(true);
-          // Keep both zoom and toolbar layout out of continuous ResizeObserver
-          // feedback loops. The overflow menu handles narrow workspaces.
+          // Fixed zoom plus toolbar overflow avoids the continuous resize loop.
           superdoc.ui.zoom.set(90);
           window.setTimeout(() => void capture(), 120);
         }}

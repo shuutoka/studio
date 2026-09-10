@@ -7,6 +7,7 @@ export type BackupExtension = "efs" | "zip";
 export type AppTheme = "normal" | "dark" | "light";
 export type InterfaceSound = "none" | "soft" | "mechanical" | "digital";
 export type WritingColorMode = "light" | "dark";
+export type WritingEditorTheme = "follow" | "light" | "dark";
 export type QuoteStyle = "straight" | "french";
 export type FooterType = "none" | "page" | "date" | "custom";
 export type ShortcutPressMode = "single" | "double";
@@ -83,6 +84,9 @@ export type StudioChapter = { id: string; title: string; pages: StudioPage[] };
 export type StudioVolume = {
   id: string;
   title: string;
+  status: PageStatus;
+  footerType: FooterType;
+  footerText: string;
   chapters: StudioChapter[];
   /**
    * SuperDoc keeps the canonical document as a DOCX blob in IndexedDB. These
@@ -93,6 +97,7 @@ export type StudioVolume = {
   documentText: string;
   documentHtml: string;
   documentPageCount: number;
+  documentOutline: Array<{ level: number; label: string }>;
 };
 
 export type CharacterRelation = {
@@ -226,7 +231,7 @@ export type StudioShortcuts = {
 };
 
 export type StudioSettings = {
-  schemaVersion: 6;
+  schemaVersion: 7;
   id: "studio-settings";
   revision: number;
   savedRevision: number;
@@ -237,6 +242,7 @@ export type StudioSettings = {
   googleDriveAppId: string;
   googleDriveFileId: string;
   theme: AppTheme;
+  writingTheme: WritingEditorTheme;
   zoom: number;
   interfaceSound: InterfaceSound;
   enabledStandardFonts: string[];
@@ -254,7 +260,7 @@ export type StudioSettings = {
 };
 
 export type StudioProject = {
-  schemaVersion: 7;
+  schemaVersion: 8;
   id: string;
   name: string;
   description: string;
@@ -304,7 +310,7 @@ export function createId(prefix: string) {
 
 export function createDefaultSettings(): StudioSettings {
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     id: "studio-settings",
     revision: 1,
     savedRevision: 1,
@@ -315,6 +321,7 @@ export function createDefaultSettings(): StudioSettings {
     googleDriveAppId: "",
     googleDriveFileId: "",
     theme: "normal",
+    writingTheme: "follow",
     zoom: 100,
     interfaceSound: "none",
     enabledStandardFonts: STANDARD_FONTS.map((font) => font.id),
@@ -373,6 +380,9 @@ export function normalizeSettings(value: unknown): StudioSettings {
     theme: ["normal", "dark", "light"].includes(input.theme ?? "")
       ? input.theme as AppTheme
       : defaults.theme,
+    writingTheme: ["follow", "light", "dark"].includes(input.writingTheme ?? "")
+      ? input.writingTheme as WritingEditorTheme
+      : defaults.writingTheme,
     zoom: Number.isFinite(input.zoom) ? Math.min(150, Math.max(75, Number(input.zoom))) : 100,
     interfaceSound: ["none", "soft", "mechanical", "digital"].includes(input.interfaceSound ?? "")
       ? input.interfaceSound as InterfaceSound
@@ -505,11 +515,15 @@ export function createEmptyVolume(index = 1, title = `Volume ${index}`): StudioV
   return {
     id: createId("volume"),
     title,
+    status: "draft",
+    footerType: "none",
+    footerText: "",
     chapters: [{ id: createId("chapter"), title: "Contenu", pages: [createEmptyPage()] }],
     documentEngine: "superdoc",
     documentText: "",
     documentHtml: "",
     documentPageCount: 1,
+    documentOutline: [],
   };
 }
 
@@ -602,7 +616,7 @@ export function getProjectStats(project: StudioProject): ProjectStats {
 export function createBlankProject(name: string, projectType: ProjectType = "manga"): StudioProject {
   const now = new Date().toISOString();
   return {
-    schemaVersion: 7, id: createId("project"), name: name.trim() || "Projet sans titre",
+    schemaVersion: 8, id: createId("project"), name: name.trim() || "Projet sans titre",
     description: "", cardColor: "#4d1824", bannerMediaId: null, status: "idea", projectType,
     defaultPageFormat: projectType === "novel" ? "novel" : projectType === "free" ? "free" : "a4",
     targetPages: 0, footerType: "none", footerText: "",
@@ -782,7 +796,7 @@ export function normalizeProject(value: unknown): StudioProject {
     .flatMap((chapter) => chapter.pages ?? [])
     .find((page) => page.footerType && page.footerType !== "none");
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     id: input.id,
     name: input.name,
     description: typeof input.description === "string" ? input.description : "",
@@ -803,6 +817,15 @@ export function normalizeProject(value: unknown): StudioProject {
     volumes: Array.isArray(input.volumes) ? input.volumes.map((volume, volumeIndex) => ({
       id: typeof volume.id === "string" ? volume.id : createId("volume"),
       title: typeof volume.title === "string" ? volume.title : `Volume ${volumeIndex + 1}`,
+      status: ["draft", "review", "done"].includes(volume.status ?? "") ? volume.status as PageStatus : "draft",
+      footerType: ["none", "page", "date", "custom"].includes(volume.footerType ?? "")
+        ? volume.footerType as FooterType
+        : ["none", "page", "date", "custom"].includes(input.footerType ?? "")
+          ? input.footerType as FooterType
+          : legacyFooterPage?.footerType ?? "none",
+      footerText: typeof volume.footerText === "string"
+        ? volume.footerText
+        : typeof input.footerText === "string" ? input.footerText : legacyFooterPage?.footerText ?? "",
       chapters: Array.isArray(volume.chapters) ? volume.chapters.map((chapter, chapterIndex) => ({
         id: typeof chapter.id === "string" ? chapter.id : createId("chapter"),
         title: typeof chapter.title === "string" ? chapter.title : `Chapitre ${chapterIndex + 1}`,
@@ -814,6 +837,12 @@ export function normalizeProject(value: unknown): StudioProject {
       documentPageCount: Number.isFinite(volume.documentPageCount)
         ? Math.max(1, Number(volume.documentPageCount))
         : Math.max(1, volume.chapters?.flatMap((chapter) => chapter.pages ?? []).length ?? 1),
+      documentOutline: Array.isArray(volume.documentOutline)
+        ? volume.documentOutline.flatMap((entry) => {
+            if (!entry || typeof entry.label !== "string" || !entry.label.trim()) return [];
+            return [{ level: Math.min(6, Math.max(1, Number(entry.level) || 1)), label: entry.label.trim() }];
+          })
+        : [],
     })) : [],
     characters: Array.isArray(input.characters) ? input.characters.map(normalizeCharacter) : [],
     notes: Array.isArray(input.notes) ? input.notes.map((note) => ({
