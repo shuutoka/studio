@@ -209,7 +209,7 @@ test("creates and migrates persistent story boards", async () => {
   project.boards[0].folderId = "folder-timeline";
 
   const normalized = normalizeProject(project);
-  assert.equal(normalized.schemaVersion, 6);
+  assert.equal(normalized.schemaVersion, 7);
   assert.equal(normalized.boards[0].name, "Ligne temporelle");
   assert.equal(normalized.boards[0].nodes.length, 2);
   assert.equal(normalized.boards[0].edges[0].label, "Puis");
@@ -303,5 +303,22 @@ test("renders the legal notice and requires feedback privacy consent", async () 
   assert.match(app, /globalView === "legal"/);
   assert.match(settingsView, /privacyAccepted/);
   assert.match(settingsView, /J’accepte que les informations saisies/);
-  assert.match(serviceWorker, /enfer-fatal-studio-infos-legales/);
+  assert.match(serviceWorker, /enfer-fatal-studio-writing-2/);
+});
+
+test("ships the native SuperDoc writing workspace and embeds documents in EFS backups", async () => {
+  const workspace = await readFile(path.join(root, "components/studio/writing-workspace.tsx"), "utf8");
+  const superdocEditor = await readFile(path.join(root, "components/studio/superdoc-writing-editor.tsx"), "utf8");
+  const projectFile = await readFile(path.join(root, "lib/project-file.ts"), "utf8");
+  const writingDocument = await readFile(path.join(root, "lib/writing-document.ts"), "utf8");
+  const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+
+  assert.equal(packageJson.dependencies["@superdoc/react"], "^2.8.0");
+  assert.match(workspace, /SuperDocWritingEditor/);
+  assert.doesNotMatch(workspace, /<RichTextEditor/);
+  assert.match(superdocEditor, /excludeItems/);
+  assert.match(superdocEditor, /"ai"/);
+  assert.match(superdocEditor, /persistWritingDocument/);
+  assert.match(writingDocument, /writing-docx/);
+  assert.match(projectFile, /formatVersion:\s*7/);
 });

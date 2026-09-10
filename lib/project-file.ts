@@ -10,6 +10,7 @@ import {
   type StudioProject,
   type StudioSettings,
 } from "@/lib/studio";
+import { writingDocumentMediaId } from "@/lib/writing-document-id";
 
 type ManifestMedia = Omit<StudioMedia, "blob"> & { path: string };
 
@@ -46,6 +47,7 @@ export async function createStudioBackup(
   const referencedMediaIds = new Set([
     ...settings.customFonts.map((font) => font.mediaId),
     ...projects.flatMap((project) => project.bannerMediaId ? [project.bannerMediaId] : []),
+    ...projects.flatMap((project) => project.volumes.map((volume) => writingDocumentMediaId(volume.id))),
     ...projects.flatMap((project) => project.characters.flatMap((character) => [
       ...character.imageIds,
       ...character.outfits.flatMap((outfit) => outfit.imageIds),
@@ -84,7 +86,7 @@ export async function createStudioBackup(
   const savedSettings = { ...settings, savedRevision: settings.revision };
   const manifest = {
     format: "enfer-fatal-studio-backup",
-    formatVersion: 6,
+    formatVersion: 7,
     exportedAt: new Date().toISOString(),
     projectCount: savedProjects.length,
     media: manifestMedia,

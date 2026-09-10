@@ -399,3 +399,71 @@ textarea {
     min-height: 360px;
   }
 }
+
+/* Writing 2.0 — SuperDoc is kept local and styled as part of the Studio. */
+.superdoc-writing-shell .superdoc-wrapper {
+  min-height: 0;
+  height: 100%;
+  color-scheme: light;
+  --sd-ui-bg: #f7f7f8;
+  --sd-ui-text: #312d35;
+  --sd-ui-action: #ef4f5f;
+  --sd-ui-border: #d9d5dc;
+  --sd-ui-hover-bg: #ece9ee;
+  --sd-ui-active-bg: #f6d9dc;
+}
+
+.superdoc-writing-shell .superdoc-toolbar-container {
+  position: relative;
+  z-index: 20;
+  flex: 0 0 auto;
+  border-bottom: 1px solid rgba(49, 45, 53, 0.14);
+  background: #f7f7f8;
+}
+
+.superdoc-writing-shell .superdoc-editor-container {
+  min-height: 0;
+  background: #28252d;
+}
+
+.superdoc-writing-shell .superdoc-page {
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.22);
+}
+
+@media print {
+  body.efs-printing-writing-document {
+    background: #fff !important;
+  }
+
+  body.efs-printing-writing-document * {
+    visibility: hidden !important;
+  }
+
+  body.efs-printing-writing-document .superdoc-writing-shell,
+  body.efs-printing-writing-document .superdoc-writing-shell * {
+    visibility: visible !important;
+  }
+
+  body.efs-printing-writing-document .superdoc-writing-shell {
+    position: absolute !important;
+    inset: 0 !important;
+    display: block !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  body.efs-printing-writing-document .superdoc-toolbar-container,
+  body.efs-printing-writing-document .superdoc-writing-status {
+    display: none !important;
+  }
+
+  body.efs-printing-writing-document .superdoc-editor-container {
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  body.efs-printing-writing-document .superdoc-page {
+    break-after: page;
+    box-shadow: none !important;
+  }
+}

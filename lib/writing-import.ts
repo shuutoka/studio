@@ -7,6 +7,8 @@ export type ImportedWritingDocument = {
   pages: string[];
   sourceFormat: "txt" | "html" | "docx" | "odt";
   pageFormat: PageFormat;
+  /** Original DOCX kept intact when formatting is preserved. */
+  nativeDocx?: File;
 };
 
 const PAGE_BREAK = "\uE000EFS_PAGE_BREAK\uE001";
@@ -46,6 +48,7 @@ export async function readWritingDocument(file: File): Promise<ImportedWritingDo
       pages: docxPages(documentXml),
       sourceFormat: "docx",
       pageFormat: docxPageFormat(documentXml),
+      nativeDocx: file,
     };
   }
   const xml = archive["content.xml"];

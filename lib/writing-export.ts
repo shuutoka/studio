@@ -2,7 +2,7 @@ import { strToU8, zipSync } from "fflate";
 
 import { safeFilename } from "@/lib/project-file";
 import {
-  stripHtml, type FooterType, type PageFormat, type StudioPage, type StudioProject, type StudioVolume,
+  getWritingDocumentStats, stripHtml, type FooterType, type PageFormat, type StudioPage, type StudioProject, type StudioVolume,
 } from "@/lib/studio";
 
 export type WritingExportFormat = "doc" | "docx" | "odt" | "pdf" | "print" | "html" | "txt";
@@ -50,7 +50,9 @@ const allowedExportElements = new Set([
 const blockElements = new Set(["BLOCKQUOTE", "DIV", "H1", "H2", "H3", "H4", "LI", "OL", "P", "PRE", "UL"]);
 
 export function getManuscriptPageCount(project: StudioProject, volumeId: string) {
-  return createManuscript(project, volumeId).pages.length;
+  const volume = project.volumes.find((candidate) => candidate.id === volumeId);
+  if (!volume) return 0;
+  return getWritingDocumentStats(volume).pages;
 }
 
 /** @deprecated Use getManuscriptPageCount. */
@@ -60,6 +62,15 @@ export function getManuscriptFilename(project: StudioProject, volumeId: string) 
   const volume = project.volumes.find((candidate) => candidate.id === volumeId);
   if (!volume) return safeFilename(project.name);
   return safeFilename(`${project.name}-${volume.title}`).replace(/-+/g, "-");
+}
+
+/**
+ * Migration bridge for Writing 2.0. Legacy HTML pages are converted once into
+ * a real DOCX, then SuperDoc becomes the canonical editor for the volume.
+ */
+export function createProjectWritingDocx(project: StudioProject, volumeId: string) {
+  const manuscript = createManuscript(project, volumeId);
+  return buildDocx(manuscript);
 }
 
 export function exportProjectWriting(

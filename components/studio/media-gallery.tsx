@@ -31,7 +31,9 @@ export function MediaGallery({ projects, onOpenProject, onOpenCharacter, onLinkC
 
   useEffect(() => {
     let cancelled = false;
-    loadAllMedia().then((items) => { if (!cancelled) setMedia(items.filter((item) => item.kind !== "font")); }).catch(() => undefined);
+    loadAllMedia().then((items) => {
+      if (!cancelled) setMedia(items.filter((item) => item.kind !== "font" && item.kind !== "writing-docx"));
+    }).catch(() => undefined);
     return () => { cancelled = true; };
   }, [signature]);
 

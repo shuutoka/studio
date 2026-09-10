@@ -103,6 +103,17 @@ export function LegalInformation({ compact = false }: { compact?: boolean }) {
             <p>
               Vous restez titulaire de vos textes, images, personnages et autres créations. Leur utilisation locale par le Studio n’accorde aucun droit sur ces contenus à l’éditeur.
             </p>
+            <p>
+              L’espace d’écriture intègre {LEGAL_INFORMATION.superDoc.name}, distribué sous licence {LEGAL_INFORMATION.superDoc.license}. Cette version du Studio est fournie sous la même licence, avec son code source public. L’intégration fonctionne dans le navigateur et n’envoie pas le contenu des manuscrits à SuperDoc.
+            </p>
+            <div className="flex flex-wrap gap-4 pt-1 text-xs">
+              <a className={linkClass} href={LEGAL_INFORMATION.sourceUrl} target="_blank" rel="noreferrer">
+                Code source du Studio <ExternalLink className="size-3" />
+              </a>
+              <a className={linkClass} href={LEGAL_INFORMATION.superDoc.sourceUrl} target="_blank" rel="noreferrer">
+                Source et licence de SuperDoc <ExternalLink className="size-3" />
+              </a>
+            </div>
           </LegalCard>
         </LegalSection>
 
@@ -263,4 +274,3 @@ function Definition({ label, children }: { label: string; children: React.ReactN
     </div>
   );
 }
-

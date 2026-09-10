@@ -5,7 +5,13 @@ export const LEGAL_INFORMATION = {
   publisherStatus: "Personne physique éditant à titre non professionnel",
   publicationDirector: "Shuutoka",
   contactEmail: "studio@report.lotaku.fr",
-  effectiveDate: "7 septembre 2026",
+  effectiveDate: "10 septembre 2026",
+  sourceUrl: "https://github.com/shuutoka/studio",
+  superDoc: {
+    name: "SuperDoc",
+    sourceUrl: "https://github.com/superdoc/docx-editor",
+    license: "GNU AGPL version 3",
+  },
   feedbackRetention: "12 mois après le dernier échange",
   host: {
     name: "GitHub, Inc.",

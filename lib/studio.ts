@@ -80,7 +80,20 @@ export type StudioPage = {
 };
 
 export type StudioChapter = { id: string; title: string; pages: StudioPage[] };
-export type StudioVolume = { id: string; title: string; chapters: StudioChapter[] };
+export type StudioVolume = {
+  id: string;
+  title: string;
+  chapters: StudioChapter[];
+  /**
+   * SuperDoc keeps the canonical document as a DOCX blob in IndexedDB. These
+   * lightweight fields keep counters and the Studio outline available without
+   * putting the binary document in React state or project JSON.
+   */
+  documentEngine: "legacy-html" | "superdoc";
+  documentText: string;
+  documentHtml: string;
+  documentPageCount: number;
+};
 
 export type CharacterRelation = {
   id: string;
@@ -191,7 +204,7 @@ export type StudioSystemFont = {
 export type StudioMedia = {
   id: string;
   projectId: string;
-  kind: "character-image" | "outfit-image" | "board-image" | "project-banner" | "font";
+  kind: "character-image" | "outfit-image" | "board-image" | "project-banner" | "font" | "writing-docx";
   name: string;
   mimeType: string;
   createdAt: string;
@@ -241,7 +254,7 @@ export type StudioSettings = {
 };
 
 export type StudioProject = {
-  schemaVersion: 6;
+  schemaVersion: 7;
   id: string;
   name: string;
   description: string;
@@ -493,6 +506,10 @@ export function createEmptyVolume(index = 1, title = `Volume ${index}`): StudioV
     id: createId("volume"),
     title,
     chapters: [{ id: createId("chapter"), title: "Contenu", pages: [createEmptyPage()] }],
+    documentEngine: "superdoc",
+    documentText: "",
+    documentHtml: "",
+    documentPageCount: 1,
   };
 }
 
@@ -514,6 +531,20 @@ export function createEmptyBoard(name = "Nouvel arbre", type: BoardType = "tree"
 }
 
 export function getWritingDocumentStats(volume: StudioVolume): WritingDocumentStats {
+  if (volume.documentEngine === "superdoc" && (volume.documentText || volume.documentHtml)) {
+    const text = volume.documentText || stripHtml(volume.documentHtml);
+    const words = text.trim() ? text.trim().split(/\s+/u).length : 0;
+    const paragraphs = text.trim()
+      ? text.split(/\n+/u).filter((paragraph) => paragraph.trim()).length
+      : 0;
+    return {
+      words,
+      paragraphs,
+      pages: Math.max(1, volume.documentPageCount || 1),
+      characters: [...text].filter((character) => !/\s/u.test(character)).length,
+      symbols: [...text].length,
+    };
+  }
   const pages = getVolumePages(volume);
   const plainPages = pages.map((page) => plainTextWithSpacing(page.content));
   const text = plainPages.join("\n");
@@ -556,13 +587,12 @@ export function getProjectStats(project: StudioProject): ProjectStats {
   const chapters = project.volumes.flatMap((volume) => volume.chapters);
   const pages = chapters.flatMap((chapter) => chapter.pages);
   const completedPages = pages.filter((page) => page.status === "done").length;
-  const words = pages.reduce((total, page) => {
-    const text = stripHtml(page.content);
-    return total + (text ? text.split(/\s+/).length : 0);
-  }, 0);
-  const progressBase = project.targetPages > 0 ? project.targetPages : pages.length;
+  const documentStats = project.volumes.map(getWritingDocumentStats);
+  const words = documentStats.reduce((total, stats) => total + stats.words, 0);
+  const pageCount = documentStats.reduce((total, stats) => total + stats.pages, 0);
+  const progressBase = project.targetPages > 0 ? project.targetPages : pageCount;
   return {
-    volumes: project.volumes.length, chapters: chapters.length, pages: pages.length,
+    volumes: project.volumes.length, chapters: chapters.length, pages: pageCount,
     completedPages, characters: project.characters.length, notes: project.notes.length, words,
     progress: progressBase > 0 ? Math.min(100, Math.round((completedPages / progressBase) * 100)) : 0,
     completedGoals: project.goals.filter((goal) => goal.status === "done").length,
@@ -572,7 +602,7 @@ export function getProjectStats(project: StudioProject): ProjectStats {
 export function createBlankProject(name: string, projectType: ProjectType = "manga"): StudioProject {
   const now = new Date().toISOString();
   return {
-    schemaVersion: 6, id: createId("project"), name: name.trim() || "Projet sans titre",
+    schemaVersion: 7, id: createId("project"), name: name.trim() || "Projet sans titre",
     description: "", cardColor: "#4d1824", bannerMediaId: null, status: "idea", projectType,
     defaultPageFormat: projectType === "novel" ? "novel" : projectType === "free" ? "free" : "a4",
     targetPages: 0, footerType: "none", footerText: "",
@@ -752,7 +782,7 @@ export function normalizeProject(value: unknown): StudioProject {
     .flatMap((chapter) => chapter.pages ?? [])
     .find((page) => page.footerType && page.footerType !== "none");
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     id: input.id,
     name: input.name,
     description: typeof input.description === "string" ? input.description : "",
@@ -778,6 +808,12 @@ export function normalizeProject(value: unknown): StudioProject {
         title: typeof chapter.title === "string" ? chapter.title : `Chapitre ${chapterIndex + 1}`,
         pages: Array.isArray(chapter.pages) ? chapter.pages.map((page, pageIndex) => normalizePage(page, pageIndex)) : [],
       })) : [],
+      documentEngine: volume.documentEngine === "superdoc" ? "superdoc" : "legacy-html",
+      documentText: typeof volume.documentText === "string" ? volume.documentText : "",
+      documentHtml: typeof volume.documentHtml === "string" ? volume.documentHtml : "",
+      documentPageCount: Number.isFinite(volume.documentPageCount)
+        ? Math.max(1, Number(volume.documentPageCount))
+        : Math.max(1, volume.chapters?.flatMap((chapter) => chapter.pages ?? []).length ?? 1),
     })) : [],
     characters: Array.isArray(input.characters) ? input.characters.map(normalizeCharacter) : [],
     notes: Array.isArray(input.notes) ? input.notes.map((note) => ({

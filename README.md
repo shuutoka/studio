@@ -8,9 +8,9 @@ globale `.efs` ou `.zip`.
 
 - accueil multi-projets avec progression et statistiques ;
 - types de projet : manga/BD, roman, script et écriture libre, avec surcharge par page ;
-- volumes, chapitres et pages vierges ;
-- simulation des formats A4, A5, poche, roman standard et grand format ;
-- éditeur enrichi : titres, polices, tailles, gras, italique, souligné, couleur et listes ;
+- volumes et chapitres structurés dans de véritables documents DOCX ;
+- pagination, sections, marges, en-têtes, pieds de page, tableaux et images gérés par SuperDoc ;
+- éditeur DOCX natif : styles de titres, polices, tailles, mise en forme, couleurs, listes, recherche et règle ;
 - ajout de polices personnalisées TTF, OTF, WOFF et WOFF2 ;
 - fiches de personnages avancées avec recherche, tags, images réordonnables, portrait principal, tenues et relations ;
 - images importées optimisées en WebP, carrousel et visionneuse en grille, liste, image ou texte ;
@@ -31,10 +31,10 @@ globale `.efs` ou `.zip`.
 - paramètres inclus dans la sauvegarde : format, nom, thèmes, zoom, sons et raccourcis ;
 - gestion globale des polices intégrées et personnalisées ;
 - cartes projet personnalisables par couleur et bannière ;
-- mode focus pour l’écriture, défilement natif fluide, fonds personnalisables et pieds de page ;
-- caractères spéciaux, guillemets et raccourcis d’écriture personnalisables ;
-- export d’un manuscrit en DOC, DOCX, ODT, PDF, HTML ou TXT ;
-- import d’un manuscrit DOCX, ODT, TXT ou HTML dans un nouveau volume ;
+- mode focus pour l’écriture et navigation par styles de titres ;
+- enregistrement automatique du DOCX dans IndexedDB ;
+- export fidèle en DOCX, impression/PDF depuis le volume ouvert et export TXT ;
+- import DOCX sans conversion HTML ; import ODT, TXT ou HTML converti en DOCX ;
 - informations légales accessibles en permanence, politique de confidentialité et consentement du formulaire de feedback ;
 - fonctionnement hors ligne progressif grâce au service worker.
 
@@ -58,6 +58,15 @@ npm run build
 ```
 
 Le site statique est généré dans `dist/client`.
+
+## Licence
+
+L’espace d’écriture utilise `superdoc` et `@superdoc/react`, distribués sous
+licence **GNU AGPL version 3**. En conséquence, cette version du Studio est
+distribuée sous la même licence AGPL-3.0. Le dépôt public et le code source
+correspondant à la version proposée sur le site doivent rester accessibles.
+Consultez `LICENSE` et `THIRD_PARTY_NOTICES.md` ; une utilisation propriétaire
+du moteur nécessite une licence commerciale distincte auprès de SuperDoc.
 
 ## Publier sur GitHub Pages
 
@@ -92,9 +101,12 @@ enfer-fatal-studio.efs
 ├── studio.json
 └── media/
     ├── images, tenues et médias des tableaux
-    └── polices personnalisées
+    ├── polices personnalisées
+    └── documents DOCX natifs des volumes
 ```
 
 Le fichier `.efs` est une archive ZIP non compressée portant une extension propre
 au Studio. Le format porte un numéro de version afin de permettre les migrations
-futures. Les anciennes archives `.efstudio.zip` restent importables.
+futures. La version 7 ajoute les DOCX natifs des volumes. Les anciennes archives
+`.efstudio.zip` et les sauvegardes EFS antérieures restent importables ; les
+anciens manuscrits HTML sont convertis à leur première ouverture.

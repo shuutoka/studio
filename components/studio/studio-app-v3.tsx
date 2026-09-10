@@ -41,6 +41,7 @@ import {
 } from "@/lib/google-drive";
 import { createStudioBackup, downloadStudioBackup, readStudioBackup } from "@/lib/project-file";
 import { isShortcutRecorderTarget, matchesShortcut } from "@/lib/shortcuts";
+import { flushOpenWritingDocuments } from "@/lib/writing-editor-registry";
 import {
   deleteMedia, deleteStoredProject, loadProjects, loadSettings, persistMedia,
   persistProjects, persistSettings, replaceLocalStudio,
@@ -173,6 +174,7 @@ export function StudioAppV3() {
     const projectRevisions = new Map(projects.map((project) => [project.id, project.revision]));
     const settingsRevision = settings.revision;
     try {
+      await flushOpenWritingDocuments();
       await downloadStudioBackup(projects, settings);
       setProjects((current) => current.map((project) => ({
         ...project,
@@ -191,6 +193,7 @@ export function StudioAppV3() {
   async function saveAllToDrive() {
     setDriveBusy(true);
     try {
+      await flushOpenWritingDocuments();
       const configuration = resolveGoogleDriveConfiguration(settings);
       const token = await authorizeGoogleDrive(configuration.clientId);
       driveTokenRef.current = token;
