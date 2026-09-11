@@ -140,6 +140,40 @@ test("counts a complete writing volume", async () => {
   assert.ok(stats.symbols > stats.characters);
 });
 
+test("counts native DOCX text and ignores stale Word pagination markers", async () => {
+  const { JSDOM } = await import("jsdom");
+  const { strToU8, zipSync } = await import("fflate");
+  const { readWritingDocument } = await vite.ssrLoadModule("/lib/writing-import.ts");
+  const { extractDocxText } = await vite.ssrLoadModule("/lib/writing-docx.ts");
+  const dom = new JSDOM();
+  const previousDOMParser = globalThis.DOMParser;
+  const previousElement = globalThis.Element;
+  const previousNode = globalThis.Node;
+  globalThis.DOMParser = dom.window.DOMParser;
+  globalThis.Element = dom.window.Element;
+  globalThis.Node = dom.window.Node;
+
+  try {
+    const staleBreaks = "<w:lastRenderedPageBreak/>".repeat(26);
+    const documentXml = `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Une seule page remplie</w:t>${staleBreaks}<w:tab/><w:t>avec du texte</w:t></w:r></w:p></w:body></w:document>`;
+    const bytes = zipSync({ "word/document.xml": strToU8(documentXml) });
+    const file = new File([bytes], "page-test.docx", { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+    const imported = await readWritingDocument(file);
+    const text = await extractDocxText(file);
+
+    assert.equal(imported.pages.length, 1);
+    assert.equal(text, "Une seule page remplie\tavec du texte");
+  } finally {
+    if (previousDOMParser) globalThis.DOMParser = previousDOMParser;
+    else delete globalThis.DOMParser;
+    if (previousElement) globalThis.Element = previousElement;
+    else delete globalThis.Element;
+    if (previousNode) globalThis.Node = previousNode;
+    else delete globalThis.Node;
+    dom.window.close();
+  }
+});
+
 test("keeps the revised writing flow controls wired", async () => {
   const editorSource = await readFile(path.join(root, "components/studio/rich-text-editor.tsx"), "utf8");
   const settingsSource = await readFile(path.join(root, "components/studio/settings-view.tsx"), "utf8");
@@ -347,6 +381,10 @@ test("reconnects Writing 2.1 to Studio preferences and native DOCX metadata", as
   assert.match(editor, /restoreFocusAfterStyle/);
   assert.match(editor, /lastSelectionTargetRef/);
   assert.match(editor, /advanceSelectionTarget/);
+  assert.match(editor, /extractDocxText\(blob\)/);
+  assert.match(editor, /getPageMetricsSnapshot/);
+  assert.match(editor, /subscribePageMetrics/);
+  assert.match(editor, /getRenderedSuperDocPages/);
   assert.match(editor, /document\.createElement\("iframe"\)/);
   assert.match(editor, /buildPrintDocument\(documentTitle, pages\)/);
   assert.match(editor, /frameWindow\.print\(\)/);

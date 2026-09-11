@@ -80,6 +80,16 @@ export async function ensureStudioDocxStyles(blob: Blob): Promise<Blob> {
   return docxBlob(zipSync(archive, { level: 6 }));
 }
 
+export async function extractDocxText(blob: Blob): Promise<string> {
+  const archive = await readDocx(blob);
+  const documentBytes = archive["word/document.xml"];
+  if (!documentBytes) return "";
+  const documentXml = parseXml(strFromU8(documentBytes));
+  const body = elementsByLocalName(documentXml, "body")[0];
+  if (!body) return "";
+  return elementsByLocalName(body, "p").map(docxParagraphText).join("\n");
+}
+
 export async function extractDocxOutline(blob: Blob): Promise<DocxOutlineEntry[]> {
   const archive = await readDocx(blob);
   const documentBytes = archive["word/document.xml"];
@@ -316,6 +326,25 @@ function removeRetiredQuickFormatStyle(style: Element) {
   if (!quickFormat) return false;
   quickFormat.remove();
   return true;
+}
+
+function docxParagraphText(paragraph: Element) {
+  let text = "";
+  const visit = (element: Element) => {
+    for (const child of [...element.children]) {
+      if (child.localName === "p") continue;
+      if (child.localName === "t") text += child.textContent ?? "";
+      else if (child.localName === "tab") text += "\t";
+      else if (child.localName === "br" || child.localName === "cr") text += "\n";
+      else if (child.localName === "noBreakHyphen") text += "‑";
+      else if (child.localName === "sym") {
+        const codePoint = Number.parseInt(attribute(child, "char"), 16);
+        if (Number.isFinite(codePoint)) text += String.fromCodePoint(codePoint);
+      } else visit(child);
+    }
+  };
+  visit(paragraph);
+  return text;
 }
 
 function parseXml(value: string) {

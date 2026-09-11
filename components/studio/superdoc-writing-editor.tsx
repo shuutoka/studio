@@ -7,7 +7,7 @@ import type { SelectionTarget } from "superdoc/ui";
 import "@superdoc/react/style.css";
 
 import { isSingleKeyShortcut, matchesShortcut } from "@/lib/shortcuts";
-import { applyDocxFooter, extractDocxOutline } from "@/lib/writing-docx";
+import { applyDocxFooter, extractDocxOutline, extractDocxText } from "@/lib/writing-docx";
 import { registerActiveWritingDocument } from "@/lib/writing-editor-registry";
 import { persistWritingDocument } from "@/lib/writing-document";
 import { STANDARD_FONTS, type StudioSettings, type StudioVolume } from "@/lib/studio";
@@ -52,6 +52,13 @@ type InsertTextPayload = {
 type PendingBodyStyleReset = {
   sourceBlockId: string;
   timer: number;
+};
+
+type SuperDocInstance = NonNullable<ReturnType<SuperDocRef["getInstance"]>>;
+type PageMetricsSnapshot = { pages?: readonly unknown[] };
+type PageMetricsHost = {
+  getPageMetricsSnapshot?: () => PageMetricsSnapshot;
+  subscribePageMetrics?: (listener: (snapshot: PageMetricsSnapshot) => void) => () => void;
 };
 
 export function SuperDocWritingEditor({
@@ -128,8 +135,14 @@ export function SuperDocWritingEditor({
       const blob = await instance.export({ exportType: ["docx"], triggerDownload: false });
       const rawHtml = await Promise.resolve(instance.activeEditor?.getHTML?.());
       const html = normalizeEditorHtml(rawHtml);
-      const text = instance.ui.document.getText() ?? plainTextFromHtml(html);
-      const pageCount = Math.max(1, shellRef.current?.querySelectorAll(".superdoc-page").length ?? 1);
+      const apiText = instance.ui.document.getText();
+      const htmlText = plainTextFromHtml(html);
+      const fallbackText = apiText?.trim() ? apiText : htmlText;
+      const text = await extractDocxText(blob).then(
+        (docxText) => docxText.trim() ? docxText : fallbackText,
+        () => fallbackText,
+      );
+      const pageCount = getSuperDocPageCount(instance, shellRef.current);
       const outline = await extractDocxOutline(blob).catch(() => volume.documentOutline);
       const serializedOutline = JSON.stringify(outline);
       latestTextRef.current = text;
@@ -158,7 +171,7 @@ export function SuperDocWritingEditor({
 
   const printEditor = useCallback((documentTitle: string) => {
     const shell = shellRef.current;
-    const pages = shell ? [...shell.querySelectorAll<HTMLElement>(".superdoc-page")] : [];
+    const pages = shell ? getRenderedSuperDocPages(shell) : [];
     if (!shell || !pages.length) return false;
 
     const frame = document.createElement("iframe");
@@ -216,7 +229,10 @@ export function SuperDocWritingEditor({
         if (!instance) throw new Error("L’éditeur n’est pas prêt.");
         return instance.export({ exportType: ["docx"], triggerDownload: false });
       },
-      getText: () => editorRef.current?.getInstance()?.ui.document.getText() ?? latestTextRef.current,
+      getText: () => {
+        const apiText = editorRef.current?.getInstance()?.ui.document.getText();
+        return apiText?.trim() ? apiText : latestTextRef.current;
+      },
       print: (documentTitle) => printEditor(documentTitle),
       navigateToText: (text) => {
         const instance = editorRef.current?.getInstance();
@@ -228,7 +244,7 @@ export function SuperDocWritingEditor({
         const instance = editorRef.current?.getInstance();
         if (!instance) throw new Error("L’éditeur n’est pas prêt.");
         const blob = await instance.export({ exportType: ["docx"], triggerDownload: false });
-        const pageCount = Math.max(1, shellRef.current?.querySelectorAll(".superdoc-page").length ?? 1);
+        const pageCount = getSuperDocPageCount(instance, shellRef.current);
         const updated = await applyDocxFooter(blob, type, text, format, pageCount);
         await Promise.resolve(instance.ui.document.replaceFile(updated));
         await persistWritingDocument(projectId, volume.id, volume.title, updated);
@@ -244,7 +260,7 @@ export function SuperDocWritingEditor({
     instance?.ui.search.find(navigationTarget.text, { caseSensitive: false });
   }, [navigationTarget, ready]);
 
-  function configureCommands(superdoc: NonNullable<ReturnType<SuperDocRef["getInstance"]>>) {
+  function configureCommands(superdoc: SuperDocInstance) {
     commandCleanupRef.current.forEach((cleanup) => cleanup());
     const textCommand = superdoc.ui.commands.register<InsertTextPayload>({
       id: "efs.insert-text",
@@ -324,10 +340,12 @@ export function SuperDocWritingEditor({
       });
     };
     document.addEventListener("click", restoreFocusAfterStyle, true);
+    const stopObservingPageMetrics = observeSuperDocPageMetrics(superdoc, scheduleCapture);
 
     commandCleanupRef.current = [
       textCommand,
       stopObservingSelection,
+      stopObservingPageMetrics,
       () => shell?.removeEventListener("keydown", interceptPageBreak, true),
       () => {
         document.removeEventListener("click", restoreFocusAfterStyle, true);
@@ -452,6 +470,7 @@ export function SuperDocWritingEditor({
           // Fixed zoom plus toolbar overflow avoids the continuous resize loop.
           superdoc.ui.zoom.set(90);
           window.setTimeout(() => void capture(), 120);
+          window.setTimeout(() => void capture(), 800);
         }}
         onEditorUpdate={scheduleCapture}
         onContentError={() => onError("SuperDoc n’a pas pu lire le contenu de ce DOCX.")}
@@ -500,6 +519,40 @@ function plainTextFromHtml(html: string) {
   const container = document.createElement("div");
   container.innerHTML = html;
   return container.textContent ?? "";
+}
+
+function getPageMetricsHost(superdoc: SuperDocInstance): PageMetricsHost | null {
+  const activeEditor = superdoc.activeEditor as unknown as { host?: PageMetricsHost } | null;
+  return activeEditor?.host ?? null;
+}
+
+function getSuperDocPageCount(superdoc: SuperDocInstance, shell: HTMLElement | null) {
+  try {
+    const count = getPageMetricsHost(superdoc)?.getPageMetricsSnapshot?.().pages?.length ?? 0;
+    if (count > 0) return count;
+  } catch {
+    // Le comptage DOM ci-dessous reste disponible si les métriques ne sont pas prêtes.
+  }
+  return Math.max(1, shell ? getRenderedSuperDocPages(shell).length : 0);
+}
+
+function observeSuperDocPageMetrics(superdoc: SuperDocInstance, listener: () => void) {
+  try {
+    return getPageMetricsHost(superdoc)?.subscribePageMetrics?.(() => listener()) ?? (() => undefined);
+  } catch {
+    return () => undefined;
+  }
+}
+
+function getRenderedSuperDocPages(shell: HTMLElement) {
+  for (const wrapper of shell.querySelectorAll<HTMLElement>("[data-v2-paint-wrapper='true']")) {
+    const pages = [...wrapper.children].filter(
+      (child): child is HTMLElement => child instanceof HTMLElement && child.classList.contains("superdoc-page"),
+    );
+    if (pages.length) return pages;
+  }
+  return [...shell.querySelectorAll<HTMLElement>(".superdoc-page")]
+    .filter((page) => !page.closest(".toolbar-dropdown-menu"));
 }
 
 function buildPrintDocument(documentTitle: string, pages: HTMLElement[]) {

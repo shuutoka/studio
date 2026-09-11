@@ -177,7 +177,9 @@ function renderDocxRun(run: Element) {
     if (node.localName === "t" || node.localName === "delText") html += escapeHtml(node.textContent ?? "");
     else if (node.localName === "tab") html += "&emsp;";
     else if (node.localName === "br") html += attribute(node, "type") === "page" ? PAGE_BREAK : "<br>";
-    else if (node.localName === "lastRenderedPageBreak") html += PAGE_BREAK;
+    // lastRenderedPageBreak décrit seulement l’ancienne pagination calculée
+    // par Word. Ce n’est pas un saut demandé par l’auteur et il devient faux
+    // dès que le document est remis en page par un autre moteur.
   }
   if (!html) return "";
   return html.split(PAGE_BREAK).map((segment) => formatDocxRunSegment(segment, properties)).join(PAGE_BREAK);
