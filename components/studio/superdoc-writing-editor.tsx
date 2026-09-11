@@ -30,9 +30,9 @@ const STUDIO_SUPERDOC_UI = {
         "table", "table-actions", "text-align", "bullet-list", "numbered-list",
         "indent-decrease", "indent-increase", "line-height",
       ] as const,
-      right: ["copy-format", "clear-formatting"] as const,
+      right: ["formatting-marks", "copy-format", "clear-formatting"] as const,
     },
-    includeItems: ["table-of-contents"] as const,
+    includeItems: ["formatting-marks", "table-of-contents"] as const,
     excludeItems: ["ai", "document-mode"] as const,
   },
   search: true,
@@ -108,6 +108,7 @@ export function SuperDocWritingEditor({
       strings: {
         "linked-style": "Styles de texte",
         "linked-style-label": "Style",
+        "formatting-marks": "Afficher les marques de mise en forme",
       },
     },
   }), [fontOptions]);

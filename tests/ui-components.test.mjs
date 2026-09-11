@@ -297,10 +297,14 @@ test("keeps SuperDoc inside the Studio viewport without continuous fit-width fee
   assert.match(editor, /comments:\s*false/);
   assert.match(editor, /ruler:\s*false/);
   assert.doesNotMatch(editor, /right:\s*\["ruler"/);
-  assert.doesNotMatch(editor, /formatting-marks/);
+  assert.match(editor, /"formatting-marks"/);
+  assert.match(editor, /Afficher les marques de mise en forme/);
   assert.match(css, /\.superdoc-writing-shell[\s\S]*contain: inline-size/);
   assert.match(css, /--sd-ui-toolbar-bg: #17151d/);
   assert.match(css, /\[data-v2-paint-wrapper="true"\][\s\S]*margin-inline: auto !important/);
+  assert.match(css, /\.writing-workspace\.fixed[\s\S]*\.superdoc-layout[\s\S]*width: 100% !important/);
+  assert.match(css, /\.sd-v2-local-selection-caret[\s\S]*background: #ef4f5f !important/);
+  assert.match(css, /\.toolbar-dropdown-option:hover[\s\S]*background: #44252d !important/);
 });
 
 test("reconnects Writing 2.1 to Studio preferences and native DOCX metadata", async () => {
