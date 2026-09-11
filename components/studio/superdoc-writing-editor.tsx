@@ -74,6 +74,7 @@ export function SuperDocWritingEditor({
   const lastSelectionTargetRef = useRef<SelectionTarget | null>(null);
   const insertTextRef = useRef<(text: string) => boolean>(() => false);
   const insertPageBreakRef = useRef<() => boolean>(() => false);
+  const pageBreakShortcutRef = useRef(settings.shortcuts.pageBreak);
   const latestTextRef = useRef(volume.documentText);
   const nextFrenchQuoteIsOpening = useRef(true);
   const pendingDoublePress = useRef<{ shortcut: string; fallback: string; timer: number } | null>(null);
@@ -87,6 +88,7 @@ export function SuperDocWritingEditor({
   const [ready, setReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  pageBreakShortcutRef.current = settings.shortcuts.pageBreak;
 
   const fontOptions = useMemo(() => [
     ...STANDARD_FONTS
@@ -174,12 +176,12 @@ export function SuperDocWritingEditor({
         instance?.ui.search.find(text, { caseSensitive: false });
       },
       insertText: (text) => insertTextRef.current(text),
-      insertPageBreak: () => insertPageBreakRef.current(),
-      applyFooter: async (type, text) => {
+      applyFooter: async (type, text, format) => {
         const instance = editorRef.current?.getInstance();
         if (!instance) throw new Error("L’éditeur n’est pas prêt.");
         const blob = await instance.export({ exportType: ["docx"], triggerDownload: false });
-        const updated = await applyDocxFooter(blob, type, text);
+        const pageCount = Math.max(1, shellRef.current?.querySelectorAll(".superdoc-page").length ?? 1);
+        const updated = await applyDocxFooter(blob, type, text, format, pageCount);
         await Promise.resolve(instance.ui.document.replaceFile(updated));
         await persistWritingDocument(projectId, volume.id, volume.title, updated);
         window.setTimeout(() => void capture(), 120);
@@ -227,7 +229,43 @@ export function SuperDocWritingEditor({
     const stopObservingSelection = superdoc.ui.selection.observe((selection) => {
       if (selection.selectionTarget) lastSelectionTargetRef.current = selection.selectionTarget;
     });
-    commandCleanupRef.current = [textCommand, pageBreakCommand, stopObservingSelection];
+    const shell = shellRef.current;
+    const interceptPageBreak = (event: KeyboardEvent) => {
+      if (event.isComposing || event.repeat) return;
+      const matchesConfiguredShortcut = matchesShortcut(event, pageBreakShortcutRef.current);
+      const matchesDefaultShortcut = matchesShortcut(event, "Ctrl+Enter") || matchesShortcut(event, "Meta+Enter");
+      if (!matchesConfiguredShortcut && !matchesDefaultShortcut) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      if (matchesConfiguredShortcut) insertPageBreakRef.current();
+    };
+    shell?.addEventListener("keydown", interceptPageBreak, true);
+
+    let restoreFocusFrame = 0;
+    const restoreFocusAfterStyle = (event: MouseEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest(".toolbar-dropdown-menu--render-only .style-name")) return;
+      const target = lastSelectionTargetRef.current;
+      if (!target) return;
+      if (restoreFocusFrame) window.cancelAnimationFrame(restoreFocusFrame);
+      restoreFocusFrame = window.requestAnimationFrame(() => {
+        lastSelectionTargetRef.current = target;
+        superdoc.ui.selection.apply(target);
+        superdoc.focus();
+      });
+    };
+    document.addEventListener("click", restoreFocusAfterStyle, true);
+
+    commandCleanupRef.current = [
+      textCommand,
+      pageBreakCommand,
+      stopObservingSelection,
+      () => shell?.removeEventListener("keydown", interceptPageBreak, true),
+      () => {
+        document.removeEventListener("click", restoreFocusAfterStyle, true);
+        if (restoreFocusFrame) window.cancelAnimationFrame(restoreFocusFrame);
+      },
+    ];
     insertTextRef.current = (text) => {
       const target = superdoc.ui.selection.current()?.selectionTarget ?? lastSelectionTargetRef.current;
       if (!target) return false;
@@ -266,11 +304,7 @@ export function SuperDocWritingEditor({
     if (event.nativeEvent.isComposing || event.repeat) return;
     const binding = settings.characterShortcuts.find((item) => item.shortcut && matchesShortcut(event, item.shortcut));
     if (pendingDoublePress.current && pendingDoublePress.current.shortcut !== binding?.shortcut) flushPendingDoublePress();
-    if (matchesShortcut(event, settings.shortcuts.pageBreak)) {
-      consumeEditorShortcut(event);
-      insertPageBreakRef.current();
-      return;
-    }
+    if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) scheduleBodyStyleAfterEnter();
     if (matchesShortcut(event, settings.shortcuts.emDash)) {
       consumeEditorShortcut(event);
       insertTextRef.current("—");
@@ -304,6 +338,23 @@ export function SuperDocWritingEditor({
       insertTextRef.current(nextFrenchQuoteIsOpening.current ? "« " : " »");
       nextFrenchQuoteIsOpening.current = !nextFrenchQuoteIsOpening.current;
     }
+  }
+
+  function scheduleBodyStyleAfterEnter() {
+    const superdoc = editorRef.current?.getInstance();
+    if (!superdoc) return;
+    const activeStyle = superdoc.ui.styles.getActiveParagraphStyle();
+    if (!activeStyle.styleId || isBodyTextStyle(activeStyle.styleId, activeStyle.styleName)) return;
+    window.requestAnimationFrame(() => {
+      void superdoc.ui.commands.executeAsync("linked-style", "Normal").then(() => {
+        const target = superdoc.ui.selection.current()?.selectionTarget;
+        if (target) lastSelectionTargetRef.current = target;
+        superdoc.focus();
+        scheduleCapture();
+      }).catch((error) => {
+        onError(error instanceof Error ? error.message : "Le style Corps de texte n’a pas pu être appliqué.");
+      });
+    });
   }
 
   function printEditor() {
@@ -368,6 +419,11 @@ function advanceSelectionTarget(target: SelectionTarget | null, text: string): S
   if (!target || target.start.kind !== "text") return null;
   const point = { ...target.start, offset: target.start.offset + text.length };
   return { ...target, start: point, end: point };
+}
+
+function isBodyTextStyle(styleId: string, styleName: string | null) {
+  const value = `${styleId} ${styleName ?? ""}`.toLocaleLowerCase("fr").replace(/[\s_-]+/gu, "");
+  return value.includes("normal") || value.includes("corpsdetexte") || value.includes("bodytext");
 }
 
 function consumeEditorShortcut(event: React.KeyboardEvent<HTMLDivElement>) {

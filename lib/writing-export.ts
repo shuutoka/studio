@@ -4,6 +4,7 @@ import { safeFilename } from "@/lib/project-file";
 import {
   getWritingDocumentStats, stripHtml, type FooterType, type PageFormat, type StudioPage, type StudioProject, type StudioVolume,
 } from "@/lib/studio";
+import { formatFooterText } from "@/lib/writing-footer";
 
 export type WritingExportFormat = "doc" | "docx" | "odt" | "pdf" | "print" | "html" | "txt";
 export type WritingExportResult = "download" | "print";
@@ -20,6 +21,7 @@ type Manuscript = {
   pages: ManuscriptPage[];
   footerType: FooterType;
   footerText: string;
+  footerFormat: StudioVolume["footerFormat"];
 };
 
 type EmbeddedImage = {
@@ -128,6 +130,7 @@ function createManuscript(project: StudioProject, volumeId: string): Manuscript 
     pages,
     footerType: volume.footerType ?? project.footerType,
     footerText: volume.footerText ?? project.footerText,
+    footerFormat: volume.footerFormat,
   };
 }
 
@@ -479,10 +482,14 @@ function htmlToPlainText(html: string) {
 
 function pageFooter(manuscript: Manuscript, page: StudioPage, pageNumber: number) {
   if (page.ignoreProjectFooter) return "";
-  if (manuscript.footerType === "page") return `${pageNumber}`;
-  if (manuscript.footerType === "date") return new Intl.DateTimeFormat("fr-FR", { dateStyle: "long" }).format(new Date());
-  if (manuscript.footerType === "custom") return manuscript.footerText;
-  return "";
+  const totalPages = manuscript.pages.filter((item) => !item.page.ignoreProjectFooter).length;
+  return formatFooterText(
+    manuscript.footerType,
+    manuscript.footerFormat,
+    manuscript.footerText,
+    pageNumber,
+    totalPages,
+  );
 }
 
 function htmlFontSize(htmlSize: string | null, cssSize: string) {

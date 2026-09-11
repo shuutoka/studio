@@ -10,6 +10,14 @@ export type WritingColorMode = "light" | "dark";
 export type WritingEditorTheme = "follow" | "light" | "dark";
 export type QuoteStyle = "straight" | "french";
 export type FooterType = "none" | "page" | "date" | "custom";
+export type FooterFormat =
+  | "page-of-total"
+  | "number-of-total"
+  | "page-only"
+  | "number-only"
+  | "date-long"
+  | "date-short"
+  | "date-iso";
 export type ShortcutPressMode = "single" | "double";
 export type WritingCounterKey = "words" | "paragraphs" | "pages" | "characters" | "symbols";
 export type BoardType = "tree" | "relationship";
@@ -87,6 +95,7 @@ export type StudioVolume = {
   status: PageStatus;
   footerType: FooterType;
   footerText: string;
+  footerFormat: FooterFormat;
   chapters: StudioChapter[];
   /**
    * SuperDoc keeps the canonical document as a DOCX blob in IndexedDB. These
@@ -518,6 +527,7 @@ export function createEmptyVolume(index = 1, title = `Volume ${index}`): StudioV
     status: "draft",
     footerType: "none",
     footerText: "",
+    footerFormat: "page-of-total",
     chapters: [{ id: createId("chapter"), title: "Contenu", pages: [createEmptyPage()] }],
     documentEngine: "superdoc",
     documentText: "",
@@ -826,6 +836,7 @@ export function normalizeProject(value: unknown): StudioProject {
       footerText: typeof volume.footerText === "string"
         ? volume.footerText
         : typeof input.footerText === "string" ? input.footerText : legacyFooterPage?.footerText ?? "",
+      footerFormat: normalizeFooterFormat(volume.footerFormat),
       chapters: Array.isArray(volume.chapters) ? volume.chapters.map((chapter, chapterIndex) => ({
         id: typeof chapter.id === "string" ? chapter.id : createId("chapter"),
         title: typeof chapter.title === "string" ? chapter.title : `Chapitre ${chapterIndex + 1}`,
@@ -870,6 +881,13 @@ export function normalizeProject(value: unknown): StudioProject {
       return [{ ...font, enabled: font.enabled !== false }];
     }) : [],
   };
+}
+
+function normalizeFooterFormat(value: unknown): FooterFormat {
+  return [
+    "page-of-total", "number-of-total", "page-only", "number-only",
+    "date-long", "date-short", "date-iso",
+  ].includes(String(value)) ? value as FooterFormat : "page-of-total";
 }
 
 export const normalizeImportedProject = normalizeProject;

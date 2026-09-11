@@ -326,12 +326,17 @@ test("reconnects Writing 2.1 to Studio preferences and native DOCX metadata", as
   assert.equal(settings.writingTheme, "follow");
   assert.equal(project.schemaVersion, 8);
   assert.equal(project.volumes[0].status, "draft");
+  assert.equal(project.volumes[0].footerFormat, "page-of-total");
   assert.deepEqual(project.volumes[0].documentOutline, []);
 
   assert.match(editor, /fontOptions/);
   assert.match(editor, /settings\.quoteStyle/);
   assert.match(editor, /settings\.characterShortcuts/);
   assert.match(editor, /efs\.insert-page-break/);
+  assert.match(editor, /interceptPageBreak/);
+  assert.match(editor, /pageBreakShortcutRef/);
+  assert.match(editor, /executeAsync\("linked-style", "Normal"\)/);
+  assert.match(editor, /restoreFocusAfterStyle/);
   assert.match(editor, /lastSelectionTargetRef/);
   assert.match(editor, /advanceSelectionTarget/);
   assert.match(editor, /stopImmediatePropagation/);
@@ -339,6 +344,9 @@ test("reconnects Writing 2.1 to Studio preferences and native DOCX metadata", as
   assert.match(controls, /Tiret cadratin/);
   assert.match(controls, /Caractères spéciaux/);
   assert.match(controls, /Pied de page du volume/);
+  assert.match(controls, /PAGE_FOOTER_FORMATS/);
+  assert.match(controls, /DATE_FOOTER_FORMATS/);
+  assert.match(controls, /Aperçu :/);
   assert.match(controls, /Feuille claire/);
   assert.doesNotMatch(controls, /Thème du Studio/);
   assert.doesNotMatch(workspace, /onThemeChange/);
@@ -346,8 +354,22 @@ test("reconnects Writing 2.1 to Studio preferences and native DOCX metadata", as
   assert.match(workspace, /ensureStudioDocxStyles/);
   assert.match(docx, /extractDocxOutline/);
   assert.match(docx, /applyDocxFooter/);
+  assert.match(docx, /fldCharType=\"separate\"/);
+  assert.match(docx, /w:dirty=\"true\"/);
   assert.match(docx, /w:styleId="Chapter"/);
   assert.match(css, /data-paper-color-mode="dark"[\s\S]*\.superdoc-page \*[\s\S]*-webkit-text-fill-color/);
   assert.match(css, /Dropdowns are teleported under <body>/);
   assert.doesNotMatch(editor, /ruler:\s*true/);
+});
+
+test("formats page numbers and dates for the native footer", async () => {
+  const { footerFormatForType, formatFooterText } = await vite.ssrLoadModule("/lib/writing-footer.ts");
+  const date = new Date(2026, 8, 11);
+
+  assert.equal(footerFormatForType("date", "page-of-total"), "date-long");
+  assert.equal(footerFormatForType("page", "date-short"), "page-of-total");
+  assert.equal(formatFooterText("page", "page-of-total", "", 3, 12), "Page 3 / 12");
+  assert.equal(formatFooterText("page", "number-only", "", 3, 12), "3");
+  assert.equal(formatFooterText("date", "date-short", "", 1, 1, date), "11/09/2026");
+  assert.equal(formatFooterText("date", "date-iso", "", 1, 1, date), "2026-09-11");
 });

@@ -211,16 +211,21 @@ export function WritingWorkspace({
     return getActiveWritingDocument(activeVolume.id)?.insertText(text) ?? false;
   }
 
-  async function applyVolumeFooter(type: StudioVolume["footerType"], text: string) {
+  async function applyVolumeFooter(
+    type: StudioVolume["footerType"],
+    text: string,
+    format: StudioVolume["footerFormat"],
+  ) {
     if (!activeVolume) throw new Error("Aucun volume n’est ouvert.");
     const activeDocument = getActiveWritingDocument(activeVolume.id);
     if (!activeDocument) throw new Error("Attendez que le document soit complètement ouvert.");
-    await activeDocument.applyFooter(type, text);
+    await activeDocument.applyFooter(type, text, format);
     updateProject((draft) => {
       const volume = draft.volumes.find((candidate) => candidate.id === activeVolume.id);
       if (!volume) return;
       volume.footerType = type;
       volume.footerText = text;
+      volume.footerFormat = format;
     });
   }
 

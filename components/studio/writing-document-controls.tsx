@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import type { FooterType, PageStatus, StudioSettings, StudioVolume } from "@/lib/studio";
+import { DATE_FOOTER_FORMATS, footerFormatForType, formatFooterText, PAGE_FOOTER_FORMATS } from "@/lib/writing-footer";
+import type { FooterFormat, FooterType, PageStatus, StudioSettings, StudioVolume } from "@/lib/studio";
 
 const specialCharacterGroups = {
   Typographie: ["« ", " »", "“", "”", "‘", "’", "‹", "›", "—", "–", "…", "•", "·", "‑", "§", "¶", "†", "‡", "№"],
@@ -40,17 +41,21 @@ export function WritingDocumentControls({
   onStatusChange: (status: PageStatus) => void;
   onPaperModeChange: (mode: "light" | "dark") => void;
   onInsert: (text: string) => boolean;
-  onApplyFooter: (type: FooterType, text: string) => Promise<void>;
+  onApplyFooter: (type: FooterType, text: string, format: FooterFormat) => Promise<void>;
 }) {
   const [footerType, setFooterType] = useState<FooterType>(volume.footerType);
   const [footerText, setFooterText] = useState(volume.footerText);
+  const [footerFormat, setFooterFormat] = useState<FooterFormat>(
+    footerFormatForType(volume.footerType, volume.footerFormat),
+  );
   const [applyingFooter, setApplyingFooter] = useState(false);
   const [characterQuery, setCharacterQuery] = useState("");
 
   useEffect(() => {
     setFooterType(volume.footerType);
     setFooterText(volume.footerText);
-  }, [volume.footerText, volume.footerType, volume.id]);
+    setFooterFormat(footerFormatForType(volume.footerType, volume.footerFormat));
+  }, [volume.footerFormat, volume.footerText, volume.footerType, volume.id]);
 
   const filteredCharacters = useMemo(() => Object.entries(specialCharacterGroups)
     .map(([group, characters]) => ({
@@ -66,7 +71,7 @@ export function WritingDocumentControls({
   async function applyFooter() {
     setApplyingFooter(true);
     try {
-      await onApplyFooter(footerType, footerText);
+      await onApplyFooter(footerType, footerText, footerFormatForType(footerType, footerFormat));
       toast.success(footerType === "none" ? "Pied de page retiré." : "Pied de page appliqué au volume.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Le pied de page n’a pas pu être appliqué.");
@@ -93,12 +98,22 @@ export function WritingDocumentControls({
           <PopoverHeader className="mb-4"><PopoverTitle>Pied de page du volume</PopoverTitle></PopoverHeader>
           <div className="grid gap-3">
             <label className="grid gap-1.5 text-xs text-[#aaa4b4]">Contenu
-              <Select value={footerType} onValueChange={(value: FooterType) => setFooterType(value)}>
+              <Select value={footerType} onValueChange={(value: FooterType) => {
+                setFooterType(value);
+                setFooterFormat((current) => footerFormatForType(value, current));
+              }}>
                 <SelectTrigger className="w-full border-white/10 bg-black/20"><SelectValue /></SelectTrigger>
                 <SelectContent><SelectItem value="none">Aucun</SelectItem><SelectItem value="page">Numérotation</SelectItem><SelectItem value="date">Date actuelle</SelectItem><SelectItem value="custom">Texte personnalisé</SelectItem></SelectContent>
               </Select>
             </label>
+            {(footerType === "page" || footerType === "date") && <label className="grid gap-1.5 text-xs text-[#aaa4b4]">Format
+              <Select value={footerFormatForType(footerType, footerFormat)} onValueChange={(value: FooterFormat) => setFooterFormat(value)}>
+                <SelectTrigger className="w-full border-white/10 bg-black/20"><SelectValue /></SelectTrigger>
+                <SelectContent>{(footerType === "page" ? PAGE_FOOTER_FORMATS : DATE_FOOTER_FORMATS).map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent>
+              </Select>
+            </label>}
             {footerType === "custom" && <label className="grid gap-1.5 text-xs text-[#aaa4b4]">Texte<Input value={footerText} className="border-white/10 bg-black/20" onChange={(event) => setFooterText(event.target.value)} /></label>}
+            {footerType !== "none" && <p className="rounded-md border border-white/7 bg-black/15 px-3 py-2 text-xs text-[#c8c2cf]">Aperçu : {formatFooterText(footerType, footerFormatForType(footerType, footerFormat), footerText, 1, 12)}</p>}
             <Button disabled={applyingFooter || (footerType === "custom" && !footerText.trim())} onClick={() => void applyFooter()}>{applyingFooter ? <LoaderCircle className="animate-spin" /> : <PanelBottom />} Appliquer</Button>
           </div>
         </PopoverContent>

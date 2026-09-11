@@ -1,7 +1,8 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 
 import { DOCX_MIME } from "@/lib/writing-document";
-import type { FooterType } from "@/lib/studio";
+import { footerFormatForType, formatFooterText } from "@/lib/writing-footer";
+import type { FooterFormat, FooterType } from "@/lib/studio";
 
 const WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 const OFFICE_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -87,7 +88,13 @@ export async function extractDocxOutline(blob: Blob): Promise<DocxOutlineEntry[]
   return entries;
 }
 
-export async function applyDocxFooter(blob: Blob, type: FooterType, text: string): Promise<Blob> {
+export async function applyDocxFooter(
+  blob: Blob,
+  type: FooterType,
+  text: string,
+  format: FooterFormat,
+  pageCount = 1,
+): Promise<Blob> {
   const archive = await readDocx(blob);
   const documentBytes = archive["word/document.xml"];
   if (!documentBytes) throw new Error("Le contenu du document DOCX est manquant.");
@@ -120,7 +127,7 @@ export async function applyDocxFooter(blob: Blob, type: FooterType, text: string
 
   setFooterReferences(archive, relationshipId);
   updateFooterContentType(archive, true);
-  archive[`word/${EFS_FOOTER_TARGET}`] = strToU8(footerXml(type, text));
+  archive[`word/${EFS_FOOTER_TARGET}`] = strToU8(footerXml(type, text, format, pageCount));
   archive["word/_rels/document.xml.rels"] = strToU8(serializeXml(relationships));
   return docxBlob(zipSync(archive, { level: 6 }));
 }
@@ -211,11 +218,32 @@ function updateFooterContentType(archive: Record<string, Uint8Array>, enabled: b
   archive[path] = strToU8(serializeXml(xml));
 }
 
-function footerXml(type: Exclude<FooterType, "none">, text: string) {
+function footerXml(
+  type: Exclude<FooterType, "none">,
+  text: string,
+  requestedFormat: FooterFormat,
+  pageCount: number,
+) {
+  const format = footerFormatForType(type, requestedFormat);
+  const totalPages = Math.max(1, Math.trunc(pageCount));
+  const currentPage = fieldRun("PAGE", "1");
+  const totalPageCount = fieldRun("NUMPAGES", String(totalPages));
+  const pageContents = format === "number-of-total"
+    ? `${currentPage}${textRun(" / ")}${totalPageCount}`
+    : format === "page-only"
+      ? `${textRun("Page ")}${currentPage}`
+      : format === "number-only"
+        ? currentPage
+        : `${textRun("Page ")}${currentPage}${textRun(" / ")}${totalPageCount}`;
+  const dateInstruction = format === "date-short"
+    ? 'DATE \\@ "dd/MM/yyyy"'
+    : format === "date-iso"
+      ? 'DATE \\@ "yyyy-MM-dd"'
+      : 'DATE \\@ "d MMMM yyyy"';
   const contents = type === "page"
-    ? `${textRun("Page ")}${fieldRun("PAGE")}${textRun(" / ")}${fieldRun("NUMPAGES")}`
+    ? pageContents
     : type === "date"
-      ? fieldRun('DATE \\@ "d MMMM yyyy"')
+      ? fieldRun(dateInstruction, formatFooterText("date", format))
       : textRun(text.trim());
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:ftr xmlns:w="${WORD_NS}"><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="120"/></w:pPr>${contents}</w:p></w:ftr>`;
 }
@@ -224,8 +252,8 @@ function textRun(value: string) {
   return value ? `<w:r><w:rPr><w:color w:val="666666"/><w:sz w:val="18"/></w:rPr><w:t xml:space="preserve">${escapeXml(value)}</w:t></w:r>` : "";
 }
 
-function fieldRun(instruction: string) {
-  return `<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> ${escapeXml(instruction)} </w:instrText></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>`;
+function fieldRun(instruction: string, cachedResult: string) {
+  return `<w:r><w:fldChar w:fldCharType="begin" w:dirty="true"/></w:r><w:r><w:instrText xml:space="preserve"> ${escapeXml(instruction)} </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r>${textRun(cachedResult)}<w:r><w:fldChar w:fldCharType="end"/></w:r>`;
 }
 
 function uniqueRelationshipId(used: Set<string>, prefix = "rIdEfsFooter") {
