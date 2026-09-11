@@ -74,7 +74,7 @@ export function WritingExportButton({
               <SelectContent><SelectItem value="docx">Word .docx — fidélité maximale</SelectItem><SelectItem value="pdf">PDF — depuis le volume ouvert</SelectItem><SelectItem value="print">Impression — depuis le volume ouvert</SelectItem><SelectItem value="txt">Texte brut .txt</SelectItem></SelectContent>
             </Select>
           </label>
-          {selectedVolumeId && <p className="rounded-lg border border-white/8 bg-black/15 px-3 py-2 text-xs text-[#8f8996]">{format === "print" ? "Impression" : <>Fichier : <span className="font-mono text-[#c8c2cf]">{getManuscriptFilename(project, selectedVolumeId)}.{format}</span></>} · {manuscriptPageCount} page{manuscriptPageCount > 1 ? "s" : ""}</p>}
+          {selectedVolumeId && <p className="rounded-lg border border-white/8 bg-black/15 px-3 py-2 text-xs text-[#8f8996]">{format === "print" ? "Document" : "Fichier"} : <span className="font-mono text-[#c8c2cf]">{getManuscriptFilename(project, selectedVolumeId)}{format === "print" ? "" : `.${format}`}</span> · {manuscriptPageCount} page{manuscriptPageCount > 1 ? "s" : ""}</p>}
         </div>
         <DialogFooter><Button variant="ghost" onClick={() => setOpen(false)}>Annuler</Button><Button className="bg-[#ef4f5f] text-white" disabled={!selectedVolumeId || manuscriptPageCount === 0} onClick={() => void startExport()}><FileDown /> Exporter</Button></DialogFooter>
       </DialogContent>

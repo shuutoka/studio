@@ -9,6 +9,8 @@ const OFFICE_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/rel
 const PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships";
 const CONTENT_TYPES_NS = "http://schemas.openxmlformats.org/package/2006/content-types";
 const EFS_FOOTER_TARGET = "efs-footer.xml";
+const STUDIO_QUICK_FORMAT_STYLE_IDS = new Set(["Normal", "Title", "Subtitle", "Heading1", "Heading2", "Heading3", "Heading4"]);
+const RETIRED_QUICK_FORMAT_STYLES = new Set(["chapter", "chapitre"]);
 
 export type DocxOutlineEntry = { level: number; label: string };
 
@@ -23,12 +25,27 @@ export async function ensureStudioDocxStyles(blob: Blob): Promise<Blob> {
   let changed = !archive[stylesPath];
 
   if (archive[stylesPath]) {
-    const existingIds = new Set(elementsByLocalName(styles, "style").map((item) => attribute(item, "styleId")));
+    const existingStyles = new Map(elementsByLocalName(styles, "style")
+      .map((item) => [attribute(item, "styleId"), item] as const)
+      .filter(([id]) => Boolean(id)));
     for (const style of elementsByLocalName(template, "style")) {
       const id = attribute(style, "styleId");
-      if (!id || existingIds.has(id)) continue;
-      styles.documentElement.append(styles.importNode(style, true));
+      if (!id || existingStyles.has(id)) continue;
+      const importedStyle = styles.importNode(style, true);
+      styles.documentElement.append(importedStyle);
+      existingStyles.set(id, importedStyle);
       changed = true;
+    }
+  }
+
+  for (const style of elementsByLocalName(styles, "style")) {
+    const styleId = attribute(style, "styleId");
+    const styleName = attribute(directChild(style, "name"), "val");
+    if (STUDIO_QUICK_FORMAT_STYLE_IDS.has(styleId)) {
+      changed = ensureQuickFormatStyle(styles, style) || changed;
+    }
+    if (isRetiredQuickFormatStyle(styleId, styleName)) {
+      changed = removeRetiredQuickFormatStyle(style) || changed;
     }
   }
 
@@ -270,7 +287,35 @@ function ensureContentTypes(archive: Record<string, Uint8Array>) {
 }
 
 function studioStylesXml() {
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="${WORD_NS}"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="120" w:line="360" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style><w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Titre"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:jc w:val="center"/><w:spacing w:before="240" w:after="240"/></w:pPr><w:rPr><w:b/><w:sz w:val="40"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Subtitle"><w:name w:val="Sous-titre"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:jc w:val="center"/><w:spacing w:after="240"/></w:pPr><w:rPr><w:i/><w:color w:val="666666"/><w:sz w:val="28"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Chapter"><w:name w:val="Chapitre"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:pageBreakBefore/><w:keepNext/><w:jc w:val="center"/><w:outlineLvl w:val="0"/><w:spacing w:before="360" w:after="360"/></w:pPr><w:rPr><w:b/><w:sz w:val="36"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="Titre 1"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:outlineLvl w:val="0"/><w:spacing w:before="240" w:after="120"/></w:pPr><w:rPr><w:b/><w:sz w:val="32"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="Titre 2"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:outlineLvl w:val="1"/><w:spacing w:before="200" w:after="100"/></w:pPr><w:rPr><w:b/><w:sz w:val="28"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="Titre 3"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:outlineLvl w:val="2"/><w:spacing w:before="160" w:after="80"/></w:pPr><w:rPr><w:b/><w:sz w:val="24"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Heading4"><w:name w:val="Titre 4"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:outlineLvl w:val="3"/></w:pPr><w:rPr><w:b/></w:rPr></w:style></w:styles>`;
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="${WORD_NS}"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="120" w:line="360" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style><w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Titre"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:jc w:val="center"/><w:spacing w:before="240" w:after="240"/></w:pPr><w:rPr><w:b/><w:sz w:val="40"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Subtitle"><w:name w:val="Sous-titre"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:jc w:val="center"/><w:spacing w:after="240"/></w:pPr><w:rPr><w:i/><w:color w:val="666666"/><w:sz w:val="28"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="Titre 1"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:outlineLvl w:val="0"/><w:spacing w:before="240" w:after="120"/></w:pPr><w:rPr><w:b/><w:sz w:val="32"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="Titre 2"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:outlineLvl w:val="1"/><w:spacing w:before="200" w:after="100"/></w:pPr><w:rPr><w:b/><w:sz w:val="28"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="Titre 3"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:outlineLvl w:val="2"/><w:spacing w:before="160" w:after="80"/></w:pPr><w:rPr><w:b/><w:sz w:val="24"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Heading4"><w:name w:val="Titre 4"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:outlineLvl w:val="3"/></w:pPr><w:rPr><w:b/></w:rPr></w:style></w:styles>`;
+}
+
+function ensureQuickFormatStyle(styles: XMLDocument, style: Element) {
+  let changed = false;
+  for (const hiddenProperty of ["semiHidden", "unhideWhenUsed"]) {
+    const property = directChild(style, hiddenProperty);
+    if (!property) continue;
+    property.remove();
+    changed = true;
+  }
+  if (!directChild(style, "qFormat")) {
+    style.append(styles.createElementNS(WORD_NS, "w:qFormat"));
+    changed = true;
+  }
+  return changed;
+}
+
+function isRetiredQuickFormatStyle(styleId: string, styleName: string) {
+  const normalizedId = styleId.trim().toLocaleLowerCase("fr");
+  const normalizedName = styleName.trim().toLocaleLowerCase("fr");
+  return RETIRED_QUICK_FORMAT_STYLES.has(normalizedId) || RETIRED_QUICK_FORMAT_STYLES.has(normalizedName);
+}
+
+function removeRetiredQuickFormatStyle(style: Element) {
+  const quickFormat = directChild(style, "qFormat");
+  if (!quickFormat) return false;
+  quickFormat.remove();
+  return true;
 }
 
 function parseXml(value: string) {

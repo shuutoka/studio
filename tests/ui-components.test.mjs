@@ -146,7 +146,7 @@ test("keeps the revised writing flow controls wired", async () => {
   const workspaceSource = await readFile(path.join(root, "components/studio/writing-workspace.tsx"), "utf8");
 
   assert.match(editorSource, /Titre H1/);
-  assert.match(editorSource, /Chapitre — H2 centré/);
+  assert.doesNotMatch(editorSource, /Chapitre — H2 centré/);
   assert.match(editorSource, /onPullBackward/);
   assert.doesNotMatch(editorSource, /addEventListener\("wheel"/);
   assert.doesNotMatch(editorSource, /event\.preventDefault\(\).*scrollTop/s);
@@ -317,7 +317,10 @@ test("reconnects Writing 2.1 to Studio preferences and native DOCX metadata", as
   const workspace = await readFile(path.join(root, "components/studio/writing-workspace.tsx"), "utf8");
   const editor = await readFile(path.join(root, "components/studio/superdoc-writing-editor.tsx"), "utf8");
   const controls = await readFile(path.join(root, "components/studio/writing-document-controls.tsx"), "utf8");
+  const exportDialog = await readFile(path.join(root, "components/studio/writing-export-button.tsx"), "utf8");
   const docx = await readFile(path.join(root, "lib/writing-docx.ts"), "utf8");
+  const legacyExport = await readFile(path.join(root, "lib/writing-export.ts"), "utf8");
+  const nativeExport = await readFile(path.join(root, "lib/writing-native-export.ts"), "utf8");
   const css = await readFile(path.join(root, "app/globals.css"), "utf8");
 
   const settings = normalizeSettings({ ...createDefaultSettings(), schemaVersion: 1 });
@@ -344,6 +347,13 @@ test("reconnects Writing 2.1 to Studio preferences and native DOCX metadata", as
   assert.match(editor, /restoreFocusAfterStyle/);
   assert.match(editor, /lastSelectionTargetRef/);
   assert.match(editor, /advanceSelectionTarget/);
+  assert.match(editor, /document\.createElement\("iframe"\)/);
+  assert.match(editor, /buildPrintDocument\(documentTitle, pages\)/);
+  assert.match(editor, /frameWindow\.print\(\)/);
+  assert.doesNotMatch(editor, /efs-printing-writing-document/);
+  assert.match(nativeExport, /active\?\.print\(filename\)/);
+  assert.match(exportDialog, /getManuscriptFilename\(project, selectedVolumeId\)/);
+  assert.doesNotMatch(css, /efs-printing-writing-document/);
   assert.match(editor, /stopImmediatePropagation/);
   assert.match(editor, /settings\.quoteStyle === "french"/);
   assert.match(controls, /Tiret cadratin/);
@@ -361,7 +371,10 @@ test("reconnects Writing 2.1 to Studio preferences and native DOCX metadata", as
   assert.match(docx, /applyDocxFooter/);
   assert.match(docx, /fldCharType=\"separate\"/);
   assert.match(docx, /w:dirty=\"true\"/);
-  assert.match(docx, /w:styleId="Chapter"/);
+  assert.match(docx, /ensureQuickFormatStyle/);
+  assert.match(docx, /removeRetiredQuickFormatStyle/);
+  assert.doesNotMatch(docx, /w:styleId="Chapter"/);
+  assert.doesNotMatch(legacyExport, /w:styleId="Chapter"/);
   assert.match(css, /data-paper-color-mode="dark"[\s\S]*\.superdoc-page \*[\s\S]*-webkit-text-fill-color/);
   assert.match(css, /Dropdowns are teleported under <body>/);
   assert.doesNotMatch(editor, /ruler:\s*true/);

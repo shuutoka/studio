@@ -250,8 +250,7 @@ export function RichTextEditor({
   function applyBlockStyle(value: string) {
     const active = restoreSelection();
     if (!active) return;
-    document.execCommand("formatBlock", false, value === "chapter" ? "h2" : value);
-    if (value === "chapter") document.execCommand("justifyCenter", false);
+    document.execCommand("formatBlock", false, value);
     rememberSelection(active.pageId);
     emitChange(active.pageId);
   }
@@ -410,7 +409,7 @@ export function RichTextEditor({
         <div className="flex items-center gap-1 overflow-x-auto px-3 py-2">
           <Select defaultValue="p" onValueChange={applyBlockStyle}>
             <SelectTrigger aria-label="Style du texte" className="w-[150px] shrink-0 border-white/10 bg-white/4" size="sm"><SelectValue /></SelectTrigger>
-            <SelectContent><SelectItem value="p">Corps de texte</SelectItem><SelectItem value="h1">Titre H1</SelectItem><SelectItem value="h2">Titre H2</SelectItem><SelectItem value="h3">Titre H3</SelectItem><SelectItem value="chapter">Chapitre — H2 centré</SelectItem><SelectItem value="blockquote">Citation</SelectItem><SelectItem value="pre">Texte préformaté</SelectItem></SelectContent>
+            <SelectContent><SelectItem value="p">Corps de texte</SelectItem><SelectItem value="h1">Titre H1</SelectItem><SelectItem value="h2">Titre H2</SelectItem><SelectItem value="h3">Titre H3</SelectItem><SelectItem value="blockquote">Citation</SelectItem><SelectItem value="pre">Texte préformaté</SelectItem></SelectContent>
           </Select>
           <Select defaultValue={fonts[0]?.family ?? "__none__"} onValueChange={(value) => { if (value !== "__none__") run("fontName", value); }}>
             <SelectTrigger aria-label="Police" className="w-[150px] shrink-0 border-white/10 bg-white/4" size="sm"><SelectValue /></SelectTrigger>

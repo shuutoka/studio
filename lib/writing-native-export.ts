@@ -13,17 +13,17 @@ export async function exportNativeWriting(
 ): Promise<NativeWritingExportResult> {
   const volume = project.volumes.find((candidate) => candidate.id === volumeId);
   if (!volume) throw new Error("Le manuscrit sélectionné est introuvable.");
+  const filename = getManuscriptFilename(project, volumeId);
   const active = getActiveWritingDocument(volumeId);
   await active?.flush();
 
   if (format === "pdf" || format === "print") {
-    if (!active?.print()) {
+    if (!active?.print(filename)) {
       throw new Error("Ouvrez ce volume dans l’espace Écriture avant de créer le PDF ou de l’imprimer.");
     }
     return "print";
   }
 
-  const filename = getManuscriptFilename(project, volumeId);
   if (format === "txt") {
     const text = active?.getText() || volume.documentText || getVolumePages(volume)
       .map((page) => stripHtml(page.content))

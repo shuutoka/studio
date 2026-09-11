@@ -156,13 +156,44 @@ export function SuperDocWritingEditor({
     saveTimerRef.current = window.setTimeout(() => void capture(), 900);
   }, [capture]);
 
-  const printEditor = useCallback(() => {
-    if (!shellRef.current) return false;
-    document.body.classList.add("efs-printing-writing-document");
-    const cleanup = () => document.body.classList.remove("efs-printing-writing-document");
-    window.addEventListener("afterprint", cleanup, { once: true });
-    window.setTimeout(cleanup, 30_000);
-    window.print();
+  const printEditor = useCallback((documentTitle: string) => {
+    const shell = shellRef.current;
+    const pages = shell ? [...shell.querySelectorAll<HTMLElement>(".superdoc-page")] : [];
+    if (!shell || !pages.length) return false;
+
+    const frame = document.createElement("iframe");
+    frame.setAttribute("aria-hidden", "true");
+    frame.title = `Impression de ${documentTitle}`;
+    frame.style.cssText = "position:fixed;left:-100000px;top:0;width:1200px;height:900px;border:0;";
+    document.body.appendChild(frame);
+
+    const frameDocument = frame.contentDocument;
+    const frameWindow = frame.contentWindow;
+    if (!frameDocument || !frameWindow) {
+      frame.remove();
+      return false;
+    }
+
+    frameDocument.open();
+    frameDocument.write(buildPrintDocument(documentTitle, pages));
+    frameDocument.close();
+    copyPrintableCanvases(pages, frameDocument);
+
+    let printed = false;
+    const cleanup = () => frame.remove();
+    const startPrint = () => {
+      if (printed || !frame.isConnected) return;
+      printed = true;
+      frameWindow.addEventListener("afterprint", cleanup, { once: true });
+      frameWindow.focus();
+      frameWindow.print();
+    };
+    const fontsReady = frameDocument.fonts?.ready ?? Promise.resolve();
+    const imagesReady = waitForPrintableImages(frameDocument);
+    const stylesReady = waitForPrintableStyles(frameDocument);
+    void Promise.all([fontsReady, imagesReady, stylesReady]).then(startPrint, startPrint);
+    window.setTimeout(startPrint, 2_500);
+    window.setTimeout(cleanup, 300_000);
     return true;
   }, []);
 
@@ -186,7 +217,7 @@ export function SuperDocWritingEditor({
         return instance.export({ exportType: ["docx"], triggerDownload: false });
       },
       getText: () => editorRef.current?.getInstance()?.ui.document.getText() ?? latestTextRef.current,
-      print: () => printEditor(),
+      print: (documentTitle) => printEditor(documentTitle),
       navigateToText: (text) => {
         const instance = editorRef.current?.getInstance();
         instance?.focus();
@@ -469,4 +500,89 @@ function plainTextFromHtml(html: string) {
   const container = document.createElement("div");
   container.innerHTML = html;
   return container.textContent ?? "";
+}
+
+function buildPrintDocument(documentTitle: string, pages: HTMLElement[]) {
+  const stylesheetMarkup = [...document.head.querySelectorAll("style, link[rel='stylesheet']")]
+    .map((element) => {
+      if (element instanceof HTMLLinkElement) {
+        return `<link rel="stylesheet" href="${escapePrintHtml(element.href)}">`;
+      }
+      return element.outerHTML;
+    })
+    .join("\n");
+  const pagesMarkup = pages.map((page) => page.outerHTML).join("\n");
+
+  return `<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <base href="${escapePrintHtml(document.baseURI)}">
+    <title>${escapePrintHtml(documentTitle)}</title>
+    ${stylesheetMarkup}
+    <style>
+      @page { margin: 0; }
+      html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
+      .efs-print-document { display: block !important; width: 100% !important; overflow: visible !important; background: #fff !important; }
+      .superdoc-page {
+        position: relative !important;
+        inset: auto !important;
+        margin: 0 auto !important;
+        box-shadow: none !important;
+        transform: none !important;
+        break-after: page;
+        page-break-after: always;
+      }
+      .superdoc-page:last-child { break-after: auto; page-break-after: auto; }
+      .sd-v2-local-selection, .sd-v2-local-selection-caret, .superdoc-comment-highlight { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <main class="efs-print-document" data-paper-color-mode="light">${pagesMarkup}</main>
+  </body>
+</html>`;
+}
+
+function copyPrintableCanvases(pages: HTMLElement[], frameDocument: Document) {
+  const sourceCanvases = pages.flatMap((page) => [...page.querySelectorAll("canvas")]);
+  const targetCanvases = [...frameDocument.querySelectorAll("canvas")];
+  sourceCanvases.forEach((source, index) => {
+    const target = targetCanvases[index];
+    if (!target) return;
+    target.width = source.width;
+    target.height = source.height;
+    try {
+      target.getContext("2d")?.drawImage(source, 0, 0);
+    } catch {
+      // Les images externes restent rendues par leur élément d’origine si le canvas est protégé.
+    }
+  });
+}
+
+function waitForPrintableImages(frameDocument: Document) {
+  const images = [...frameDocument.images];
+  return Promise.all(images.map((image) => image.complete
+    ? Promise.resolve()
+    : new Promise<void>((resolve) => {
+      image.addEventListener("load", () => resolve(), { once: true });
+      image.addEventListener("error", () => resolve(), { once: true });
+    })));
+}
+
+function waitForPrintableStyles(frameDocument: Document) {
+  const stylesheets = [...frameDocument.querySelectorAll<HTMLLinkElement>("link[rel='stylesheet']")];
+  return Promise.all(stylesheets.map((stylesheet) => stylesheet.sheet
+    ? Promise.resolve()
+    : new Promise<void>((resolve) => {
+      stylesheet.addEventListener("load", () => resolve(), { once: true });
+      stylesheet.addEventListener("error", () => resolve(), { once: true });
+    })));
+}
+
+function escapePrintHtml(value: string) {
+  return value
+    .replace(/&/gu, "&amp;")
+    .replace(/</gu, "&lt;")
+    .replace(/>/gu, "&gt;")
+    .replace(/"/gu, "&quot;");
 }
