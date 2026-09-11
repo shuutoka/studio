@@ -550,9 +550,23 @@ textarea {
   transform-origin: top center !important;
 }
 
-/* In focus mode the layout used to keep the intrinsic page width, so the page
- * was technically centered inside a box that was itself stuck to the left. */
-.writing-workspace.fixed .superdoc-writing-shell [data-v2-paint-wrapper="true"] > .superdoc-layout {
+/* Every V2 wrapper between the SuperDoc viewport and the page defaults to the
+ * intrinsic A4 width. In focus mode the whole chain must use the viewport
+ * width, otherwise centering the final page has no visible effect. */
+.writing-workspace.fixed .superdoc-writing-shell :is(
+  .superdoc__layers,
+  .superdoc__document,
+  .superdoc__sub-document,
+  .v2-super-editor,
+  .v2-super-editor__visuals,
+  .v2-super-editor__stage
+) {
+  box-sizing: border-box;
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.writing-workspace.fixed .superdoc-writing-shell .superdoc-layout[data-v2-paint-wrapper="true"] {
   box-sizing: border-box;
   width: 100% !important;
   min-width: 100% !important;
@@ -642,10 +656,37 @@ textarea {
   color: #d8d3dd !important;
 }
 
-[data-studio-theme="normal"] :is(.toolbar-dropdown-option:hover, .toolbar-dropdown-option.sd-selected, .sd-font-combobox__option:hover, .sd-font-combobox__option.sd-active, .sd-font-combobox__option.sd-selected, .style-name:hover, .v2-context-menu__item--highlighted, .v2-table-actions__item--highlighted),
-[data-studio-theme="dark"] :is(.toolbar-dropdown-option:hover, .toolbar-dropdown-option.sd-selected, .sd-font-combobox__option:hover, .sd-font-combobox__option.sd-active, .sd-font-combobox__option.sd-selected, .style-name:hover, .v2-context-menu__item--highlighted, .v2-table-actions__item--highlighted) {
+[data-studio-theme="normal"] :is(.toolbar-dropdown-option:not(.sd-render):hover, .toolbar-dropdown-option:not(.sd-render).sd-selected, .sd-font-combobox__option:hover, .sd-font-combobox__option.sd-active, .sd-font-combobox__option.sd-selected, .style-name:hover, .v2-context-menu__item--highlighted, .v2-table-actions__item--highlighted),
+[data-studio-theme="dark"] :is(.toolbar-dropdown-option:not(.sd-render):hover, .toolbar-dropdown-option:not(.sd-render).sd-selected, .sd-font-combobox__option:hover, .sd-font-combobox__option.sd-active, .sd-font-combobox__option.sd-selected, .style-name:hover, .v2-context-menu__item--highlighted, .v2-table-actions__item--highlighted) {
   background: #44252d !important;
   color: #ffffff !important;
+}
+
+[data-studio-theme="normal"] .toolbar-dropdown-menu--render-only .toolbar-dropdown-option.sd-render,
+[data-studio-theme="dark"] .toolbar-dropdown-menu--render-only .toolbar-dropdown-option.sd-render {
+  display: block;
+  padding: 0;
+  background: transparent !important;
+  color: inherit !important;
+}
+
+.toolbar-dropdown-menu--render-only .linked-style-buttons,
+.toolbar-dropdown-menu--render-only .style-name {
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.toolbar-dropdown-menu--render-only .style-name {
+  display: flex;
+  height: 44px;
+  min-height: 44px;
+  align-items: center;
+  overflow: hidden;
+  padding: 0 12px !important;
+  font-size: 15px !important;
+  line-height: 20px !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media print {

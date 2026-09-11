@@ -302,9 +302,14 @@ test("keeps SuperDoc inside the Studio viewport without continuous fit-width fee
   assert.match(css, /\.superdoc-writing-shell[\s\S]*contain: inline-size/);
   assert.match(css, /--sd-ui-toolbar-bg: #17151d/);
   assert.match(css, /\[data-v2-paint-wrapper="true"\][\s\S]*margin-inline: auto !important/);
-  assert.match(css, /\.writing-workspace\.fixed[\s\S]*\.superdoc-layout[\s\S]*width: 100% !important/);
+  assert.match(css, /\.writing-workspace\.fixed[\s\S]*\.superdoc-layout\[data-v2-paint-wrapper="true"\][\s\S]*width: 100% !important/);
+  assert.match(css, /\.writing-workspace\.fixed[\s\S]*\.superdoc__layers[\s\S]*\.v2-super-editor__stage[\s\S]*min-width: 0 !important/);
   assert.match(css, /\.sd-v2-local-selection-caret[\s\S]*background: #ef4f5f !important/);
-  assert.match(css, /\.toolbar-dropdown-option:hover[\s\S]*background: #44252d !important/);
+  assert.match(css, /\.toolbar-dropdown-option:not\(\.sd-render\):hover[\s\S]*background: #44252d !important/);
+  assert.match(css, /\.toolbar-dropdown-menu--render-only[\s\S]*\.toolbar-dropdown-option\.sd-render[\s\S]*background: transparent !important/);
+  assert.match(css, /\.toolbar-dropdown-menu--render-only \.style-name[\s\S]*height: 44px[\s\S]*font-size: 15px !important/);
+  assert.match(editor, /left: \["undo", "redo", "search"\]/);
+  assert.match(editor, /center: \[\s*"linked-style", "zoom"/);
 });
 
 test("reconnects Writing 2.1 to Studio preferences and native DOCX metadata", async () => {

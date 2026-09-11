@@ -23,9 +23,9 @@ const STUDIO_SUPERDOC_UI = {
   toolbar: {
     overflow: "menu" as const,
     items: {
-      left: ["undo", "redo", "search", "linked-style"] as const,
+      left: ["undo", "redo", "search"] as const,
       center: [
-        "zoom", "font-family", "font-size", "bold", "italic", "underline",
+        "linked-style", "zoom", "font-family", "font-size", "bold", "italic", "underline",
         "strikethrough", "text-color", "highlight-color", "link", "image",
         "table", "table-actions", "text-align", "bullet-list", "numbered-list",
         "indent-decrease", "indent-increase", "line-height",
