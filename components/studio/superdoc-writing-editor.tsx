@@ -49,6 +49,11 @@ type InsertTextPayload = {
   target: SelectionTarget;
 };
 
+type PendingBodyStyleReset = {
+  sourceBlockId: string;
+  timer: number;
+};
+
 export function SuperDocWritingEditor({
   projectId,
   volume,
@@ -73,7 +78,8 @@ export function SuperDocWritingEditor({
   const commandCleanupRef = useRef<Array<() => void>>([]);
   const lastSelectionTargetRef = useRef<SelectionTarget | null>(null);
   const insertTextRef = useRef<(text: string) => boolean>(() => false);
-  const insertPageBreakRef = useRef<() => boolean>(() => false);
+  const pendingBodyStyleResetRef = useRef<PendingBodyStyleReset | null>(null);
+  const replayingNativePageBreakRef = useRef(false);
   const pageBreakShortcutRef = useRef(settings.shortcuts.pageBreak);
   const latestTextRef = useRef(volume.documentText);
   const nextFrenchQuoteIsOpening = useRef(true);
@@ -88,7 +94,6 @@ export function SuperDocWritingEditor({
   const [ready, setReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  pageBreakShortcutRef.current = settings.shortcuts.pageBreak;
 
   const fontOptions = useMemo(() => [
     ...STANDARD_FONTS
@@ -151,13 +156,25 @@ export function SuperDocWritingEditor({
     saveTimerRef.current = window.setTimeout(() => void capture(), 900);
   }, [capture]);
 
+  const printEditor = useCallback(() => {
+    if (!shellRef.current) return false;
+    document.body.classList.add("efs-printing-writing-document");
+    const cleanup = () => document.body.classList.remove("efs-printing-writing-document");
+    window.addEventListener("afterprint", cleanup, { once: true });
+    window.setTimeout(cleanup, 30_000);
+    window.print();
+    return true;
+  }, []);
+
   useEffect(() => () => {
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
     if (pendingDoublePress.current) window.clearTimeout(pendingDoublePress.current.timer);
+    if (pendingBodyStyleResetRef.current) window.clearTimeout(pendingBodyStyleResetRef.current.timer);
     commandCleanupRef.current.forEach((cleanup) => cleanup());
   }, []);
 
   useEffect(() => { nextFrenchQuoteIsOpening.current = true; }, [settings.quoteStyle]);
+  useEffect(() => { pageBreakShortcutRef.current = settings.shortcuts.pageBreak; }, [settings.shortcuts.pageBreak]);
 
   useEffect(() => {
     if (!ready) return;
@@ -187,7 +204,7 @@ export function SuperDocWritingEditor({
         window.setTimeout(() => void capture(), 120);
       },
     });
-  }, [capture, projectId, ready, volume.id, volume.title]);
+  }, [capture, printEditor, projectId, ready, volume.id, volume.title]);
 
   useEffect(() => {
     if (!ready || !navigationTarget?.text) return;
@@ -210,37 +227,58 @@ export function SuperDocWritingEditor({
         });
       },
     });
-    const pageBreakCommand = superdoc.ui.commands.register({
-      id: "efs.insert-page-break",
-      execute: ({ doc, selection }) => {
-        const insert = doc?.insert;
-        if (typeof insert !== "function") return false;
-        const point = selection.selectionTarget?.start;
-        const blockId = point?.kind === "text" ? point.blockId : undefined;
-        return insert.call(doc, {
-          ...(blockId ? {
-            target: { kind: "block", nodeType: "paragraph", nodeId: blockId },
-            placement: "after",
-          } : {}),
-          content: { kind: "break", break: { type: "page" } },
-        });
-      },
-    });
     const stopObservingSelection = superdoc.ui.selection.observe((selection) => {
       if (selection.selectionTarget) lastSelectionTargetRef.current = selection.selectionTarget;
+      const pending = pendingBodyStyleResetRef.current;
+      const currentBlockId = getTextBlockId(selection.selectionTarget);
+      if (!pending || !currentBlockId || currentBlockId === pending.sourceBlockId) return;
+
+      window.clearTimeout(pending.timer);
+      pendingBodyStyleResetRef.current = null;
+      void superdoc.ui.commands.executeAsync("linked-style", "Normal").then(() => {
+        const target = superdoc.ui.selection.current()?.selectionTarget;
+        if (target) lastSelectionTargetRef.current = target;
+        superdoc.focus();
+        scheduleCapture();
+      }).catch((error) => {
+        onError(error instanceof Error ? error.message : "Le style Corps de texte n’a pas pu être appliqué.");
+      });
     });
     const shell = shellRef.current;
     const interceptPageBreak = (event: KeyboardEvent) => {
-      if (event.isComposing || event.repeat) return;
+      if (event.isComposing || event.repeat || replayingNativePageBreakRef.current) return;
       const matchesConfiguredShortcut = matchesShortcut(event, pageBreakShortcutRef.current);
-      const matchesDefaultShortcut = matchesShortcut(event, "Ctrl+Enter") || matchesShortcut(event, "Meta+Enter");
-      if (!matchesConfiguredShortcut && !matchesDefaultShortcut) return;
+      const matchesNativeShortcut = matchesShortcut(event, "Ctrl+Enter") || matchesShortcut(event, "Meta+Enter");
+      if (!matchesConfiguredShortcut && !matchesNativeShortcut) return;
+      if (matchesConfiguredShortcut && matchesNativeShortcut) return;
+
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
-      if (matchesConfiguredShortcut) insertPageBreakRef.current();
+      if (matchesConfiguredShortcut) replayNativePageBreakShortcut(event);
     };
     shell?.addEventListener("keydown", interceptPageBreak, true);
+
+    const replayNativePageBreakShortcut = (sourceEvent: KeyboardEvent) => {
+      const target = sourceEvent.target;
+      if (!(target instanceof EventTarget)) return;
+      const useMetaKey = /Mac|iPhone|iPad|iPod/iu.test(window.navigator.platform);
+      replayingNativePageBreakRef.current = true;
+      try {
+        target.dispatchEvent(new KeyboardEvent("keydown", {
+          key: "Enter",
+          code: "Enter",
+          ctrlKey: !useMetaKey,
+          metaKey: useMetaKey,
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+        }));
+      } finally {
+        replayingNativePageBreakRef.current = false;
+      }
+      window.setTimeout(scheduleCapture, 120);
+    };
 
     let restoreFocusFrame = 0;
     const restoreFocusAfterStyle = (event: MouseEvent) => {
@@ -258,7 +296,6 @@ export function SuperDocWritingEditor({
 
     commandCleanupRef.current = [
       textCommand,
-      pageBreakCommand,
       stopObservingSelection,
       () => shell?.removeEventListener("keydown", interceptPageBreak, true),
       () => {
@@ -284,12 +321,6 @@ export function SuperDocWritingEditor({
       });
       return true;
     };
-    insertPageBreakRef.current = () => {
-      superdoc.focus();
-      pageBreakCommand.handle.execute();
-      scheduleCapture();
-      return true;
-    };
   }
 
   function flushPendingDoublePress() {
@@ -304,7 +335,7 @@ export function SuperDocWritingEditor({
     if (event.nativeEvent.isComposing || event.repeat) return;
     const binding = settings.characterShortcuts.find((item) => item.shortcut && matchesShortcut(event, item.shortcut));
     if (pendingDoublePress.current && pendingDoublePress.current.shortcut !== binding?.shortcut) flushPendingDoublePress();
-    if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) scheduleBodyStyleAfterEnter();
+    if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) armBodyStyleResetAfterEnter();
     if (matchesShortcut(event, settings.shortcuts.emDash)) {
       consumeEditorShortcut(event);
       insertTextRef.current("—");
@@ -340,31 +371,18 @@ export function SuperDocWritingEditor({
     }
   }
 
-  function scheduleBodyStyleAfterEnter() {
+  function armBodyStyleResetAfterEnter() {
     const superdoc = editorRef.current?.getInstance();
     if (!superdoc) return;
     const activeStyle = superdoc.ui.styles.getActiveParagraphStyle();
-    if (!activeStyle.styleId || isBodyTextStyle(activeStyle.styleId, activeStyle.styleName)) return;
-    window.requestAnimationFrame(() => {
-      void superdoc.ui.commands.executeAsync("linked-style", "Normal").then(() => {
-        const target = superdoc.ui.selection.current()?.selectionTarget;
-        if (target) lastSelectionTargetRef.current = target;
-        superdoc.focus();
-        scheduleCapture();
-      }).catch((error) => {
-        onError(error instanceof Error ? error.message : "Le style Corps de texte n’a pas pu être appliqué.");
-      });
-    });
-  }
+    const sourceBlockId = getTextBlockId(superdoc.ui.selection.current()?.selectionTarget);
+    if (!activeStyle.styleId || !sourceBlockId || isBodyTextStyle(activeStyle.styleId, activeStyle.styleName)) return;
 
-  function printEditor() {
-    if (!shellRef.current) return false;
-    document.body.classList.add("efs-printing-writing-document");
-    const cleanup = () => document.body.classList.remove("efs-printing-writing-document");
-    window.addEventListener("afterprint", cleanup, { once: true });
-    window.setTimeout(cleanup, 30_000);
-    window.print();
-    return true;
+    if (pendingBodyStyleResetRef.current) window.clearTimeout(pendingBodyStyleResetRef.current.timer);
+    const timer = window.setTimeout(() => {
+      pendingBodyStyleResetRef.current = null;
+    }, 1_500);
+    pendingBodyStyleResetRef.current = { sourceBlockId, timer };
   }
 
   return (
@@ -419,6 +437,10 @@ function advanceSelectionTarget(target: SelectionTarget | null, text: string): S
   if (!target || target.start.kind !== "text") return null;
   const point = { ...target.start, offset: target.start.offset + text.length };
   return { ...target, start: point, end: point };
+}
+
+function getTextBlockId(target: SelectionTarget | null | undefined) {
+  return target?.start.kind === "text" ? target.start.blockId : null;
 }
 
 function isBodyTextStyle(styleId: string, styleName: string | null) {

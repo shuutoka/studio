@@ -332,9 +332,14 @@ test("reconnects Writing 2.1 to Studio preferences and native DOCX metadata", as
   assert.match(editor, /fontOptions/);
   assert.match(editor, /settings\.quoteStyle/);
   assert.match(editor, /settings\.characterShortcuts/);
-  assert.match(editor, /efs\.insert-page-break/);
   assert.match(editor, /interceptPageBreak/);
   assert.match(editor, /pageBreakShortcutRef/);
+  assert.match(editor, /replayNativePageBreakShortcut/);
+  assert.match(editor, /matchesConfiguredShortcut && matchesNativeShortcut/);
+  assert.doesNotMatch(editor, /efs\.insert-page-break/);
+  assert.doesNotMatch(editor, /pageBreakCommand/);
+  assert.match(editor, /pendingBodyStyleResetRef/);
+  assert.match(editor, /currentBlockId === pending\.sourceBlockId/);
   assert.match(editor, /executeAsync\("linked-style", "Normal"\)/);
   assert.match(editor, /restoreFocusAfterStyle/);
   assert.match(editor, /lastSelectionTargetRef/);
