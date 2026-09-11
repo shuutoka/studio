@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readdir, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test, { after } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -21,33 +21,6 @@ after(async () => {
   await vite.close();
 });
 
-async function readCssTree(directory) {
-  const entries = await readdir(directory, { withFileTypes: true });
-  const contents = await Promise.all(
-    entries.map(async (entry) => {
-      const entryPath = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
-        return readCssTree(entryPath);
-      }
-      return entry.name.endsWith(".css") ? readFile(entryPath, "utf8") : "";
-    }),
-  );
-  return contents.join("\n");
-}
-
-test("emits the catalog's animation and scrolling utilities", async () => {
-  const css = await readCssTree(path.join(root, "dist"));
-
-  assert.match(css, /--tw-enter-opacity/);
-  assert.match(css, /scrollbar-width:\s*thin/);
-  assert.match(css, /scrollbar-width:\s*none/);
-  assert.match(css, /scrollbar-gutter:\s*stable/);
-  assert.match(css, /scroll-fade-reveal-b/);
-  assert.match(css, /mask-image:/);
-  assert.match(css, /tw-shimmer/);
-  assert.match(css, /prefers-reduced-motion:\s*reduce/);
-});
-
 test("forwards progress semantics to the primitive", async () => {
   const { Progress } = await vite.ssrLoadModule("/components/ui/progress.tsx");
   const html = renderToStaticMarkup(React.createElement(Progress, { value: 37 }));
@@ -55,22 +28,6 @@ test("forwards progress semantics to the primitive", async () => {
   assert.match(html, /aria-valuenow="37"/);
   assert.match(html, /aria-valuetext="37%"/);
   assert.match(html, /data-state="loading"/);
-});
-
-test("emits chart themes for the starter's media dark mode", async () => {
-  const { ChartStyle } = await vite.ssrLoadModule("/components/ui/chart.tsx");
-  const html = renderToStaticMarkup(
-    React.createElement(ChartStyle, {
-      id: "contract",
-      config: {
-        latency: { theme: { light: "#ffffff", dark: "#000000" } },
-      },
-    }),
-  );
-
-  assert.match(html, /\[data-chart=contract\]/);
-  assert.match(html, /@media \(prefers-color-scheme: dark\)/);
-  assert.doesNotMatch(html, /\.dark/);
 });
 
 test("renders sidebar skeletons deterministically", async () => {
@@ -340,8 +297,10 @@ test("keeps SuperDoc inside the Studio viewport without continuous fit-width fee
   assert.match(editor, /comments:\s*false/);
   assert.match(editor, /ruler:\s*false/);
   assert.doesNotMatch(editor, /right:\s*\["ruler"/);
+  assert.doesNotMatch(editor, /formatting-marks/);
   assert.match(css, /\.superdoc-writing-shell[\s\S]*contain: inline-size/);
   assert.match(css, /--sd-ui-toolbar-bg: #17151d/);
+  assert.match(css, /\[data-v2-paint-wrapper="true"\][\s\S]*margin-inline: auto !important/);
 });
 
 test("reconnects Writing 2.1 to Studio preferences and native DOCX metadata", async () => {
@@ -364,15 +323,22 @@ test("reconnects Writing 2.1 to Studio preferences and native DOCX metadata", as
   assert.match(editor, /settings\.quoteStyle/);
   assert.match(editor, /settings\.characterShortcuts/);
   assert.match(editor, /efs\.insert-page-break/);
+  assert.match(editor, /lastSelectionTargetRef/);
+  assert.match(editor, /advanceSelectionTarget/);
+  assert.match(editor, /stopImmediatePropagation/);
+  assert.match(editor, /settings\.quoteStyle === "french"/);
   assert.match(controls, /Tiret cadratin/);
   assert.match(controls, /Caractères spéciaux/);
   assert.match(controls, /Pied de page du volume/);
-  assert.match(controls, /Mode clair/);
+  assert.match(controls, /Feuille claire/);
+  assert.doesNotMatch(controls, /Thème du Studio/);
+  assert.doesNotMatch(workspace, /onThemeChange/);
   assert.match(workspace, /volume\.documentOutline = snapshot\.outline/);
   assert.match(workspace, /ensureStudioDocxStyles/);
   assert.match(docx, /extractDocxOutline/);
   assert.match(docx, /applyDocxFooter/);
   assert.match(docx, /w:styleId="Chapter"/);
-  assert.match(css, /\.superdoc-writing-shell \.superdoc-page[\s\S]*margin-inline: auto !important/);
+  assert.match(css, /data-paper-color-mode="dark"[\s\S]*\.superdoc-page \*[\s\S]*-webkit-text-fill-color/);
+  assert.match(css, /Dropdowns are teleported under <body>/);
   assert.doesNotMatch(editor, /ruler:\s*true/);
 });

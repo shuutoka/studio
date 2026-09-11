@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, LoaderCircle, Save } from "lucide-react";
 import { SuperDocEditor, type SuperDocRef } from "@superdoc/react";
+import type { SelectionTarget } from "superdoc/ui";
 import "@superdoc/react/style.css";
 
 import { isSingleKeyShortcut, matchesShortcut } from "@/lib/shortcuts";
@@ -29,9 +30,9 @@ const STUDIO_SUPERDOC_UI = {
         "table", "table-actions", "text-align", "bullet-list", "numbered-list",
         "indent-decrease", "indent-increase", "line-height",
       ] as const,
-      right: ["formatting-marks", "copy-format", "clear-formatting"] as const,
+      right: ["copy-format", "clear-formatting"] as const,
     },
-    includeItems: ["formatting-marks", "table-of-contents"] as const,
+    includeItems: ["table-of-contents"] as const,
     excludeItems: ["ai", "document-mode"] as const,
   },
   search: true,
@@ -42,6 +43,11 @@ const STUDIO_SUPERDOC_UI = {
 
 const STUDIO_SUPERDOC_MODULES = { comments: false } as const;
 const doublePressDelay = 450;
+
+type InsertTextPayload = {
+  text: string;
+  target: SelectionTarget;
+};
 
 export function SuperDocWritingEditor({
   projectId,
@@ -65,6 +71,7 @@ export function SuperDocWritingEditor({
   const saveTimerRef = useRef<number | null>(null);
   const captureQueueRef = useRef(Promise.resolve());
   const commandCleanupRef = useRef<Array<() => void>>([]);
+  const lastSelectionTargetRef = useRef<SelectionTarget | null>(null);
   const insertTextRef = useRef<(text: string) => boolean>(() => false);
   const insertPageBreakRef = useRef<() => boolean>(() => false);
   const latestTextRef = useRef(volume.documentText);
@@ -104,10 +111,6 @@ export function SuperDocWritingEditor({
       },
     },
   }), [fontOptions]);
-
-  const writingTheme = settings.writingTheme === "follow"
-    ? settings.theme === "light" ? "light" : "dark"
-    : settings.writingTheme;
 
   const capture = useCallback(async () => {
     const instance = editorRef.current?.getInstance();
@@ -192,9 +195,17 @@ export function SuperDocWritingEditor({
 
   function configureCommands(superdoc: NonNullable<ReturnType<SuperDocRef["getInstance"]>>) {
     commandCleanupRef.current.forEach((cleanup) => cleanup());
-    const textCommand = superdoc.ui.commands.register<string>({
+    const textCommand = superdoc.ui.commands.register<InsertTextPayload>({
       id: "efs.insert-text",
-      execute: ({ insertText, payload }) => insertText(typeof payload === "string" ? payload : ""),
+      execute: ({ doc, payload }) => {
+        const insert = doc?.insert;
+        if (typeof insert !== "function" || !payload?.text || !payload.target) return false;
+        return insert.call(doc, {
+          target: payload.target,
+          value: payload.text,
+          type: "text",
+        });
+      },
     });
     const pageBreakCommand = superdoc.ui.commands.register({
       id: "efs.insert-page-break",
@@ -212,11 +223,26 @@ export function SuperDocWritingEditor({
         });
       },
     });
-    commandCleanupRef.current = [textCommand, pageBreakCommand];
+    const stopObservingSelection = superdoc.ui.selection.observe((selection) => {
+      if (selection.selectionTarget) lastSelectionTargetRef.current = selection.selectionTarget;
+    });
+    commandCleanupRef.current = [textCommand, pageBreakCommand, stopObservingSelection];
     insertTextRef.current = (text) => {
+      const target = superdoc.ui.selection.current()?.selectionTarget ?? lastSelectionTargetRef.current;
+      if (!target) return false;
       superdoc.focus();
-      textCommand.handle.execute(text);
-      scheduleCapture();
+      superdoc.ui.selection.apply(target);
+      void textCommand.handle.executeAsync({ text, target }).then(() => {
+        const caret = advanceSelectionTarget(target, text);
+        if (caret) {
+          lastSelectionTargetRef.current = caret;
+          superdoc.ui.selection.apply(caret);
+        }
+        superdoc.focus();
+        scheduleCapture();
+      }).catch((error) => {
+        onError(error instanceof Error ? error.message : "Le texte n’a pas pu être inséré.");
+      });
       return true;
     };
     insertPageBreakRef.current = () => {
@@ -240,22 +266,22 @@ export function SuperDocWritingEditor({
     const binding = settings.characterShortcuts.find((item) => item.shortcut && matchesShortcut(event, item.shortcut));
     if (pendingDoublePress.current && pendingDoublePress.current.shortcut !== binding?.shortcut) flushPendingDoublePress();
     if (matchesShortcut(event, settings.shortcuts.pageBreak)) {
-      event.preventDefault();
+      consumeEditorShortcut(event);
       insertPageBreakRef.current();
       return;
     }
     if (matchesShortcut(event, settings.shortcuts.emDash)) {
-      event.preventDefault();
+      consumeEditorShortcut(event);
       insertTextRef.current("—");
       return;
     }
     if (binding && (binding.pressMode === "single" || !isSingleKeyShortcut(binding.shortcut))) {
-      event.preventDefault();
+      consumeEditorShortcut(event);
       insertTextRef.current(binding.character);
       return;
     }
     if (binding?.pressMode === "double") {
-      event.preventDefault();
+      consumeEditorShortcut(event);
       const pending = pendingDoublePress.current;
       if (pending?.shortcut === binding.shortcut) {
         window.clearTimeout(pending.timer);
@@ -272,10 +298,10 @@ export function SuperDocWritingEditor({
       }
       return;
     }
-    if (event.key === '"' && !event.ctrlKey && !event.metaKey && !event.altKey) {
-      event.preventDefault();
-      insertTextRef.current(settings.quoteStyle === "straight" ? '"' : nextFrenchQuoteIsOpening.current ? "« " : " »");
-      if (settings.quoteStyle === "french") nextFrenchQuoteIsOpening.current = !nextFrenchQuoteIsOpening.current;
+    if (event.key === '"' && settings.quoteStyle === "french" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      consumeEditorShortcut(event);
+      insertTextRef.current(nextFrenchQuoteIsOpening.current ? "« " : " »");
+      nextFrenchQuoteIsOpening.current = !nextFrenchQuoteIsOpening.current;
     }
   }
 
@@ -292,9 +318,12 @@ export function SuperDocWritingEditor({
   return (
     <div
       ref={shellRef}
-      className={`superdoc-writing-shell writing-theme-${writingTheme} relative flex w-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden`}
+      className="superdoc-writing-shell relative flex w-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden"
       data-paper-color-mode={settings.paperColorMode}
-      style={{ "--efs-paper-background": settings.paperBackground } as React.CSSProperties}
+      style={{
+        "--efs-paper-background": settings.paperBackground,
+        "--sd-layout-page-color": settings.paperColorMode === "dark" ? "#eeeaf2" : "#29262b",
+      } as React.CSSProperties}
       onKeyDownCapture={handleKeyDown}
     >
       <div className="superdoc-writing-status pointer-events-none absolute bottom-3 right-4 z-30 rounded-full border border-white/10 bg-[#17151d]/95 px-2.5 py-1 text-[11px] font-medium text-[#aaa4b4] shadow-lg backdrop-blur">
@@ -332,6 +361,18 @@ export function SuperDocWritingEditor({
       />
     </div>
   );
+}
+
+function advanceSelectionTarget(target: SelectionTarget | null, text: string): SelectionTarget | null {
+  if (!target || target.start.kind !== "text") return null;
+  const point = { ...target.start, offset: target.start.offset + text.length };
+  return { ...target, start: point, end: point };
+}
+
+function consumeEditorShortcut(event: React.KeyboardEvent<HTMLDivElement>) {
+  event.preventDefault();
+  event.stopPropagation();
+  event.nativeEvent.stopImmediatePropagation();
 }
 
 function normalizeEditorHtml(value: unknown): string {

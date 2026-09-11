@@ -265,7 +265,6 @@ export function WritingWorkspace({
           volume={activeVolume}
           settings={settings}
           onStatusChange={updateVolumeStatus}
-          onThemeChange={(theme) => updateSettings((draft) => { draft.writingTheme = theme; })}
           onPaperModeChange={(mode) => updateSettings((draft) => {
             draft.paperColorMode = mode;
             draft.paperBackground = mode === "light" ? "#ffffff" : "#15131a";

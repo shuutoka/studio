@@ -11,7 +11,7 @@ globale `.efs` ou `.zip`.
 - volumes et chapitres structurés dans de véritables documents DOCX ;
 - pagination, sections, marges, en-têtes, pieds de page, tableaux et images gérés par SuperDoc ;
 - éditeur DOCX natif : styles Titre, Sous-titre, Chapitre et Titre 1 à 4, polices du Studio, tailles, mise en forme, couleurs, listes et recherche ;
-- feuille centrée, thème d’écriture clair/sombre, fond de feuille clair/sombre, état du manuscrit et pied de page par volume ;
+- feuille centrée, interface assortie au thème du Studio, véritable affichage de feuille clair/sombre, état du manuscrit et pied de page par volume ;
 - guillemets, raccourcis, tiret cadratin et palette de caractères spéciaux reliés aux paramètres du Studio ;
 - ajout de polices personnalisées TTF, OTF, WOFF et WOFF2 ;
 - fiches de personnages avancées avec recherche, tags, images réordonnables, portrait principal, tenues et relations ;

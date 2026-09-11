@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { LoaderCircle, Minus, Moon, PanelBottom, Sigma, Sun, SunMoon } from "lucide-react";
+import { LoaderCircle, Minus, Moon, PanelBottom, Sigma, Sun } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import type { FooterType, PageStatus, StudioSettings, StudioVolume, WritingEditorTheme } from "@/lib/studio";
+import type { FooterType, PageStatus, StudioSettings, StudioVolume } from "@/lib/studio";
 
 const specialCharacterGroups = {
   Typographie: ["« ", " »", "“", "”", "‘", "’", "‹", "›", "—", "–", "…", "•", "·", "‑", "§", "¶", "†", "‡", "№"],
@@ -31,7 +31,6 @@ export function WritingDocumentControls({
   volume,
   settings,
   onStatusChange,
-  onThemeChange,
   onPaperModeChange,
   onInsert,
   onApplyFooter,
@@ -39,7 +38,6 @@ export function WritingDocumentControls({
   volume: StudioVolume;
   settings: StudioSettings;
   onStatusChange: (status: PageStatus) => void;
-  onThemeChange: (theme: WritingEditorTheme) => void;
   onPaperModeChange: (mode: "light" | "dark") => void;
   onInsert: (text: string) => boolean;
   onApplyFooter: (type: FooterType, text: string) => Promise<void>;
@@ -84,15 +82,6 @@ export function WritingDocumentControls({
         <SelectContent>{Object.entries(statusLabels).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
       </Select>
 
-      <Select value={settings.writingTheme} onValueChange={(value: WritingEditorTheme) => onThemeChange(value)}>
-        <SelectTrigger size="sm" className="w-40 shrink-0 border-white/10 bg-white/3 text-xs" aria-label="Thème de l’espace d’écriture"><ThemeIcon theme={settings.writingTheme} /><SelectValue /></SelectTrigger>
-        <SelectContent>
-          <SelectItem value="follow"><SunMoon /> Thème du Studio</SelectItem>
-          <SelectItem value="light"><Sun /> Mode clair</SelectItem>
-          <SelectItem value="dark"><Moon /> Mode sombre</SelectItem>
-        </SelectContent>
-      </Select>
-
       <div className="flex shrink-0 items-center rounded-md border border-white/10 bg-white/3 p-0.5" aria-label="Couleur de la feuille">
         <Button aria-label="Feuille claire" title="Feuille claire" aria-pressed={settings.paperColorMode === "light"} size="icon-xs" variant={settings.paperColorMode === "light" ? "default" : "ghost"} className={settings.paperColorMode === "light" ? "bg-[#ef4f5f] text-white" : ""} onClick={() => onPaperModeChange("light")}><Sun /></Button>
         <Button aria-label="Feuille sombre" title="Feuille sombre" aria-pressed={settings.paperColorMode === "dark"} size="icon-xs" variant={settings.paperColorMode === "dark" ? "default" : "ghost"} className={settings.paperColorMode === "dark" ? "bg-[#ef4f5f] text-white" : ""} onClick={() => onPaperModeChange("dark")}><Moon /></Button>
@@ -130,10 +119,4 @@ export function WritingDocumentControls({
       </Popover>
     </div>
   );
-}
-
-function ThemeIcon({ theme }: { theme: WritingEditorTheme }) {
-  if (theme === "light") return <Sun />;
-  if (theme === "dark") return <Moon />;
-  return <SunMoon />;
 }

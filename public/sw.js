@@ -1,4 +1,4 @@
-const CACHE_NAME = "enfer-fatal-studio-writing-2-1-integration";
+const CACHE_NAME = "enfer-fatal-studio-writing-2-1-correctif-ui";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => {

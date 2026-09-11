@@ -217,13 +217,6 @@ export function SettingsView({
                       ))}
                     </div>
                   </Field>
-                  <Field label="Thème de l’espace d’écriture">
-                    <Select value={settings.writingTheme} onValueChange={(value: StudioSettings["writingTheme"]) => updateSettings((draft) => { draft.writingTheme = value; })}>
-                      <SelectTrigger className="w-full border-white/10 bg-black/20 sm:w-72"><SelectValue /></SelectTrigger>
-                      <SelectContent><SelectItem value="follow">Suivre le thème du Studio</SelectItem><SelectItem value="light">Toujours clair</SelectItem><SelectItem value="dark">Toujours sombre</SelectItem></SelectContent>
-                    </Select>
-                    <p className="mt-2 text-xs leading-5 text-[#77717f]">Ce choix agit sur l’interface de l’éditeur. La couleur réelle de la feuille reste définie par « Fond des feuilles ».</p>
-                  </Field>
                   <Field label={`Zoom de l’interface — ${zoomDraft ?? settings.zoom} %`}>
                     <div className="grid gap-3">
                       <div className="flex items-center gap-4">
