@@ -1,4 +1,5 @@
 import { getActiveWritingDocument } from "@/lib/writing-editor-registry";
+import { exportDocxWithDrawings } from "@/lib/writing-drawing-export";
 import { loadOrCreateWritingDocument } from "@/lib/writing-document";
 import { getManuscriptFilename } from "@/lib/writing-export";
 import { getVolumePages, stripHtml, type StudioProject } from "@/lib/studio";
@@ -34,7 +35,11 @@ export async function exportNativeWriting(
 
   const blob = active
     ? await active.exportDocx()
-    : await loadOrCreateWritingDocument(project, volumeId);
+    : await exportDocxWithDrawings(
+        await loadOrCreateWritingDocument(project, volumeId),
+        volume.documentDrawings,
+        volume.pageFormat,
+      );
   download(blob, `${filename}.docx`);
   return "download";
 }

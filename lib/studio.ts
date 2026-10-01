@@ -24,6 +24,8 @@ export type WritingDrawingPoint = { x: number; y: number };
 export type WritingDrawingStroke = {
   id: string;
   pageIndex: number;
+  /** OOXML paragraph id used to keep the annotation on its laid-out page during export. */
+  anchorBlockId?: string;
   color: string;
   size: number;
   points: WritingDrawingPoint[];
@@ -276,7 +278,7 @@ export type StudioSettings = {
 };
 
 export type StudioProject = {
-  schemaVersion: 9;
+  schemaVersion: 10;
   id: string;
   name: string;
   description: string;
@@ -627,7 +629,7 @@ export function getProjectStats(project: StudioProject): ProjectStats {
 export function createBlankProject(name: string, projectType: ProjectType = "manga"): StudioProject {
   const now = new Date().toISOString();
   return {
-    schemaVersion: 9, id: createId("project"), name: name.trim() || "Projet sans titre",
+    schemaVersion: 10, id: createId("project"), name: name.trim() || "Projet sans titre",
     description: "", cardColor: "#4d1824", bannerMediaId: null, status: "idea", projectType,
     defaultPageFormat: projectType === "novel" ? "novel" : projectType === "free" ? "free" : "a4",
     targetPages: 0, footerType: "none", footerText: "",
@@ -807,7 +809,7 @@ export function normalizeProject(value: unknown): StudioProject {
     .flatMap((chapter) => chapter.pages ?? [])
     .find((page) => page.footerType && page.footerType !== "none");
   return {
-    schemaVersion: 9,
+    schemaVersion: 10,
     id: input.id,
     name: input.name,
     description: typeof input.description === "string" ? input.description : "",
@@ -921,6 +923,9 @@ function normalizeWritingDrawings(value: unknown): WritingDrawingStroke[] {
     return [{
       id: typeof input.id === "string" && input.id ? input.id : createId("drawing"),
       pageIndex: Number.isFinite(input.pageIndex) ? Math.max(0, Math.trunc(Number(input.pageIndex))) : 0,
+      anchorBlockId: typeof input.anchorBlockId === "string" && input.anchorBlockId.trim()
+        ? input.anchorBlockId.trim()
+        : undefined,
       color: normalizeColor(input.color, "#ef4f5f"),
       size: Number.isFinite(input.size) ? Math.min(24, Math.max(1, Number(input.size))) : 4,
       points,

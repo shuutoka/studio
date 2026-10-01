@@ -54,7 +54,7 @@ export function WritingExportButton({
   }
 
   return <>
-    <Button variant="outline" size={compact ? "sm" : "default"} className="shrink-0 border-white/10 bg-white/3" onClick={openDialog}><FileDown /> {compact ? "Exporter" : "Exporter l’écriture"}</Button>
+    <Button variant="outline" size={compact ? "sm" : "default"} className="shrink-0 border-white/10 bg-white/3" aria-label={compact ? "Exporter" : undefined} onClick={openDialog}><FileDown /> {compact ? <span className="hidden sm:inline">Exporter</span> : "Exporter l’écriture"}</Button>
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="border-white/10 bg-[#17151d] text-[#eeeaf2]">
         <DialogHeader>

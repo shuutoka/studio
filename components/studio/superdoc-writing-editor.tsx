@@ -7,10 +7,11 @@ import type { CommentInfo, SelectionCapture, SelectionTarget } from "superdoc/ui
 import "@superdoc/react/style.css";
 
 import { isSingleKeyShortcut, matchesShortcut } from "@/lib/shortcuts";
+import { exportDocxWithDrawings } from "@/lib/writing-drawing-export";
 import { applyDocxFooter, applyDocxPageFormat, extractDocxOutline, extractDocxText } from "@/lib/writing-docx";
 import { registerActiveWritingDocument } from "@/lib/writing-editor-registry";
 import { persistWritingDocument } from "@/lib/writing-document";
-import { createId, STANDARD_FONTS, type StudioSettings, type StudioVolume, type WritingDrawingStroke } from "@/lib/studio";
+import { createId, PAGE_FORMATS, STANDARD_FONTS, type StudioSettings, type StudioVolume, type WritingDrawingStroke } from "@/lib/studio";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
@@ -242,7 +243,9 @@ export function SuperDocWritingEditor({
       exportDocx: async () => {
         const instance = editorRef.current?.getInstance();
         if (!instance) throw new Error("L’éditeur n’est pas prêt.");
-        return instance.export({ exportType: ["docx"], triggerDownload: false });
+        const blob = await instance.export({ exportType: ["docx"], triggerDownload: false });
+        const pageAnchors = shellRef.current ? getRenderedPageAnchors(shellRef.current) : new Map<number, string>();
+        return exportDocxWithDrawings(blob, volume.documentDrawings, volume.pageFormat, pageAnchors);
       },
       getText: () => {
         const apiText = editorRef.current?.getInstance()?.ui.document.getText();
@@ -275,7 +278,7 @@ export function SuperDocWritingEditor({
         window.setTimeout(() => void capture(), 160);
       },
     });
-  }, [capture, printEditor, projectId, ready, volume.id, volume.title]);
+  }, [capture, printEditor, projectId, ready, volume.documentDrawings, volume.id, volume.pageFormat, volume.title]);
 
   useEffect(() => {
     if (!ready || !navigationTarget?.text) return;
@@ -290,9 +293,17 @@ export function SuperDocWritingEditor({
     const detach: Array<() => void> = [];
 
     const attachLayers = () => {
+      const pageAnchors = getRenderedPageAnchors(shell);
       getRenderedSuperDocPages(shell).forEach((page, pageIndex) => {
         if (page.querySelector(":scope > .efs-drawing-layer")) return;
-        detach.push(attachDrawingLayer(page, pageIndex, volume.documentDrawings, drawingTool, onAddDrawing));
+        detach.push(attachDrawingLayer(
+          page,
+          pageIndex,
+          pageAnchors.get(pageIndex) ?? "",
+          volume.documentDrawings,
+          drawingTool,
+          onAddDrawing,
+        ));
       });
     };
 
@@ -304,6 +315,62 @@ export function SuperDocWritingEditor({
       detach.forEach((cleanup) => cleanup());
     };
   }, [drawingTool, onAddDrawing, ready, volume.documentDrawings]);
+
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!ready || !shell || !drawingTool.enabled) return;
+    const preventEditorSelection = (event: Event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+    };
+    shell.addEventListener("selectstart", preventEditorSelection, true);
+    shell.addEventListener("dragstart", preventEditorSelection, true);
+    return () => {
+      shell.removeEventListener("selectstart", preventEditorSelection, true);
+      shell.removeEventListener("dragstart", preventEditorSelection, true);
+    };
+  }, [drawingTool.enabled, ready]);
+
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!ready || !shell || !superdocInstance) return;
+    let animationFrame = 0;
+    let lastWidth = -1;
+    let wasMobile: boolean | null = null;
+    const fitPageOnPhone = () => {
+      const width = Math.round(shell.getBoundingClientRect().width);
+      if (width <= 0 || width === lastWidth) return;
+      lastWidth = width;
+      const mobile = width <= 767;
+      if (mobile) {
+        const metrics = superdocInstance.getViewportMetrics();
+        const documentWidth = metrics?.documentWidth || PAGE_FORMATS[volume.pageFormat].width;
+        const availableWidth = Math.max(240, Math.min(width, metrics?.availableWidth || width) - 16);
+        const zoom = Math.max(25, Math.min(90, Math.floor((availableWidth / documentWidth) * 100)));
+        if (Math.abs(superdocInstance.getZoom() - zoom) > 1) superdocInstance.setZoom(zoom);
+      } else if (wasMobile === true) {
+        superdocInstance.setZoom(90);
+      }
+      wasMobile = mobile;
+    };
+    const scheduleFit = () => {
+      window.cancelAnimationFrame(animationFrame);
+      animationFrame = window.requestAnimationFrame(fitPageOnPhone);
+    };
+    const observer = new ResizeObserver(scheduleFit);
+    observer.observe(shell);
+    scheduleFit();
+    const delayedFit = window.setTimeout(() => {
+      lastWidth = -1;
+      scheduleFit();
+    }, 350);
+    return () => {
+      observer.disconnect();
+      window.clearTimeout(delayedFit);
+      window.cancelAnimationFrame(animationFrame);
+    };
+  }, [ready, superdocInstance, volume.pageFormat]);
 
   function configureCommands(superdoc: SuperDocInstance) {
     commandCleanupRef.current.forEach((cleanup) => cleanup());
@@ -673,6 +740,7 @@ function WritingCommentsLayer({
 function attachDrawingLayer(
   page: HTMLElement,
   pageIndex: number,
+  anchorBlockId: string,
   drawings: WritingDrawingStroke[],
   tool: { enabled: boolean; color: string; size: number },
   onAddDrawing: (stroke: WritingDrawingStroke) => void,
@@ -693,6 +761,11 @@ function attachDrawingLayer(
   }
 
   let active: { pointerId: number; points: Array<{ x: number; y: number }>; path: SVGPathElement } | null = null;
+  const consumePointerEvent = (event: PointerEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+  };
   const pointFromEvent = (event: PointerEvent) => {
     const rect = layer.getBoundingClientRect();
     return {
@@ -702,8 +775,7 @@ function attachDrawingLayer(
   };
   const pointerDown = (event: PointerEvent) => {
     if (!tool.enabled || (event.pointerType === "mouse" && event.button !== 0)) return;
-    event.preventDefault();
-    event.stopPropagation();
+    consumePointerEvent(event);
     const points = [pointFromEvent(event)];
     const path = createDrawingPath(namespace, points, tool.color, tool.size);
     layer.append(path);
@@ -712,7 +784,7 @@ function attachDrawingLayer(
   };
   const pointerMove = (event: PointerEvent) => {
     if (!active || active.pointerId !== event.pointerId) return;
-    event.preventDefault();
+    consumePointerEvent(event);
     const point = pointFromEvent(event);
     const previous = active.points.at(-1)!;
     if (Math.hypot(point.x - previous.x, point.y - previous.y) < 0.0015) return;
@@ -721,18 +793,46 @@ function attachDrawingLayer(
   };
   const finishStroke = (event: PointerEvent) => {
     if (!active || active.pointerId !== event.pointerId) return;
-    event.preventDefault();
+    consumePointerEvent(event);
     if (active.points.length === 1) active.points.push({ x: Math.min(1, active.points[0].x + 0.001), y: active.points[0].y });
-    onAddDrawing({ id: createId("drawing"), pageIndex, color: tool.color, size: tool.size, points: active.points });
+    onAddDrawing({
+      id: createId("drawing"),
+      pageIndex,
+      anchorBlockId: anchorBlockId || undefined,
+      color: tool.color,
+      size: tool.size,
+      points: active.points,
+    });
+    if (layer.hasPointerCapture(event.pointerId)) layer.releasePointerCapture(event.pointerId);
     active = null;
   };
-  layer.addEventListener("pointerdown", pointerDown);
-  layer.addEventListener("pointermove", pointerMove);
-  layer.addEventListener("pointerup", finishStroke);
-  layer.addEventListener("pointercancel", finishStroke);
+  layer.addEventListener("pointerdown", pointerDown, true);
+  layer.addEventListener("pointermove", pointerMove, true);
+  layer.addEventListener("pointerup", finishStroke, true);
+  layer.addEventListener("pointercancel", finishStroke, true);
   page.style.position = "relative";
   page.append(layer);
   return () => layer.remove();
+}
+
+function getPageBlockIds(page: HTMLElement) {
+  const preferred = [...page.querySelectorAll<HTMLElement>("[data-layout-story='body'][data-layout-block-ref]")];
+  const candidates = preferred.length
+    ? preferred
+    : [...page.querySelectorAll<HTMLElement>("[data-layout-block-ref]")];
+  return [...new Set(candidates.map((item) => item.getAttribute("data-layout-block-ref") ?? "").filter(Boolean))];
+}
+
+function getRenderedPageAnchors(shell: HTMLElement) {
+  const seen = new Set<string>();
+  const anchors = new Map<number, string>();
+  getRenderedSuperDocPages(shell).forEach((page, pageIndex) => {
+    const blockIds = getPageBlockIds(page);
+    const anchor = blockIds.find((blockId) => !seen.has(blockId)) ?? blockIds[0];
+    if (anchor) anchors.set(pageIndex, anchor);
+    blockIds.forEach((blockId) => seen.add(blockId));
+  });
+  return anchors;
 }
 
 function createDrawingPath(namespace: string, points: Array<{ x: number; y: number }>, color: string, size: number) {

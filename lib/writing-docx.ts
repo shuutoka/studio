@@ -8,11 +8,21 @@ const WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 const OFFICE_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships";
 const CONTENT_TYPES_NS = "http://schemas.openxmlformats.org/package/2006/content-types";
+const WORDPROCESSING_DRAWING_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing";
+const DRAWING_NS = "http://schemas.openxmlformats.org/drawingml/2006/main";
+const PICTURE_NS = "http://schemas.openxmlformats.org/drawingml/2006/picture";
 const EFS_FOOTER_TARGET = "efs-footer.xml";
 const STUDIO_QUICK_FORMAT_STYLE_IDS = new Set(["Normal", "Title", "Subtitle", "Heading1", "Heading2", "Heading3", "Heading4"]);
 const RETIRED_QUICK_FORMAT_STYLES = new Set(["chapter", "chapitre"]);
 
 export type DocxOutlineEntry = { level: number; label: string };
+export type DocxDrawingOverlay = {
+  pageIndex: number;
+  anchorBlockId: string;
+  pngBytes: Uint8Array;
+  widthPx: number;
+  heightPx: number;
+};
 
 export async function ensureStudioDocxStyles(blob: Blob): Promise<Blob> {
   const archive = await readDocx(blob);
@@ -187,6 +197,87 @@ export async function applyDocxPageFormat(blob: Blob, pageFormat: PageFormat): P
   }
   archive["word/document.xml"] = strToU8(serializeXml(documentXml));
   return docxBlob(zipSync(archive, { level: 6 }));
+}
+
+export async function applyDocxDrawingOverlays(blob: Blob, overlays: DocxDrawingOverlay[]): Promise<Blob> {
+  if (!overlays.length) return blob;
+  const archive = await readDocx(blob);
+  const documentBytes = archive["word/document.xml"];
+  if (!documentBytes) throw new Error("Le contenu du document DOCX est manquant.");
+
+  const documentXml = parseXml(strFromU8(documentBytes));
+  const relationships = ensureRelationships(archive);
+  const usedRelationshipIds = new Set(
+    directChildren(relationships.documentElement, "Relationship").map((item) => item.getAttribute("Id") ?? ""),
+  );
+  const paragraphs = elementsByLocalName(documentXml, "p");
+  const usedMediaPaths = new Set(Object.keys(archive));
+  let drawingId = Math.max(0, ...elementsByLocalName(documentXml, "docPr").map((item) => Number(attribute(item, "id")) || 0));
+  let embedded = 0;
+
+  for (const overlay of overlays) {
+    const normalizedAnchor = overlay.anchorBlockId.toLocaleLowerCase("en");
+    const paragraph = paragraphs.find((item) => attribute(item, "paraId").toLocaleLowerCase("en") === normalizedAnchor);
+    if (!paragraph) continue;
+
+    let mediaIndex = overlay.pageIndex + 1;
+    let mediaPath = `word/media/efs-drawing-page-${mediaIndex}.png`;
+    while (usedMediaPaths.has(mediaPath)) {
+      mediaIndex += 1;
+      mediaPath = `word/media/efs-drawing-page-${mediaIndex}.png`;
+    }
+    usedMediaPaths.add(mediaPath);
+
+    const relationshipId = uniqueRelationshipId(usedRelationshipIds, "rIdEfsDrawing");
+    usedRelationshipIds.add(relationshipId);
+    const relationship = relationships.createElementNS(PACKAGE_REL_NS, "Relationship");
+    relationship.setAttribute("Id", relationshipId);
+    relationship.setAttribute("Type", `${OFFICE_REL_NS}/image`);
+    relationship.setAttribute("Target", mediaPath.replace(/^word\//u, ""));
+    relationships.documentElement.append(relationship);
+
+    drawingId += 1;
+    const widthEmu = Math.max(1, Math.round(overlay.widthPx * 9_525));
+    const heightEmu = Math.max(1, Math.round(overlay.heightPx * 9_525));
+    paragraph.append(createAnchoredDrawingRun(documentXml, {
+      relationshipId,
+      drawingId,
+      name: `Annotations manuscrites — page ${overlay.pageIndex + 1}`,
+      widthEmu,
+      heightEmu,
+    }));
+    archive[mediaPath] = overlay.pngBytes;
+    embedded += 1;
+  }
+
+  if (!embedded) {
+    throw new Error("Les dessins n’ont pas pu être reliés aux pages du DOCX. Ouvrez le volume dans l’espace Écriture puis relancez l’export.");
+  }
+
+  const contentTypes = ensureContentTypes(archive);
+  const hasPngType = directChildren(contentTypes.documentElement, "Default")
+    .some((item) => item.getAttribute("Extension")?.toLocaleLowerCase("en") === "png");
+  if (!hasPngType) {
+    const pngType = contentTypes.createElementNS(CONTENT_TYPES_NS, "Default");
+    pngType.setAttribute("Extension", "png");
+    pngType.setAttribute("ContentType", "image/png");
+    contentTypes.documentElement.append(pngType);
+  }
+
+  archive["word/document.xml"] = strToU8(serializeXml(documentXml));
+  archive["word/_rels/document.xml.rels"] = strToU8(serializeXml(relationships));
+  archive["[Content_Types].xml"] = strToU8(serializeXml(contentTypes));
+  return docxBlob(zipSync(archive, { level: 6 }));
+}
+
+function createAnchoredDrawingRun(
+  documentXml: XMLDocument,
+  drawing: { relationshipId: string; drawingId: number; name: string; widthEmu: number; heightEmu: number },
+) {
+  const fragment = parseXml(`<root xmlns:w="${WORD_NS}" xmlns:r="${OFFICE_REL_NS}" xmlns:wp="${WORDPROCESSING_DRAWING_NS}" xmlns:a="${DRAWING_NS}" xmlns:pic="${PICTURE_NS}"><w:r><w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="251658240" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/><wp:positionH relativeFrom="page"><wp:posOffset>0</wp:posOffset></wp:positionH><wp:positionV relativeFrom="page"><wp:posOffset>0</wp:posOffset></wp:positionV><wp:extent cx="${drawing.widthEmu}" cy="${drawing.heightEmu}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapNone/><wp:docPr id="${drawing.drawingId}" name="${escapeXml(drawing.name)}" descr="${escapeXml(drawing.name)}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic><a:graphicData uri="${PICTURE_NS}"><pic:pic><pic:nvPicPr><pic:cNvPr id="${drawing.drawingId}" name="${escapeXml(drawing.name)}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${escapeXml(drawing.relationshipId)}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${drawing.widthEmu}" cy="${drawing.heightEmu}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r></root>`);
+  const run = fragment.documentElement.firstElementChild;
+  if (!run) throw new Error("L’image des annotations n’a pas pu être créée dans le DOCX.");
+  return documentXml.importNode(run, true);
 }
 
 async function readDocx(blob: Blob) {

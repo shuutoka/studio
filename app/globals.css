@@ -595,6 +595,22 @@ textarea {
   cursor: crosshair;
 }
 
+.superdoc-writing-shell[data-drawing-active="true"] .superdoc-page {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+/* In pen mode the SVG is the only interactive page child. This prevents the
+ * desktop editor from starting a text selection underneath the pointer. */
+.superdoc-writing-shell[data-drawing-active="true"] .superdoc-page > :not(.efs-drawing-layer) {
+  pointer-events: none !important;
+}
+
+.superdoc-writing-shell[data-drawing-active="true"] .efs-drawing-layer {
+  pointer-events: auto !important;
+  touch-action: none !important;
+}
+
 .superdoc-writing-shell[data-comments-visible="false"] .superdoc-comment-highlight {
   background: transparent !important;
   box-shadow: none !important;
@@ -630,6 +646,62 @@ textarea {
   .efs-comments-layer .efs-comments-toolbar {
     right: 0.5rem !important;
     width: min(19rem, calc(100% - 1rem)) !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .writing-workspace > header > div:first-child {
+    gap: 0.35rem;
+    padding-inline: 0.5rem;
+  }
+
+  .writing-workspace > header > div:first-child > div:first-child {
+    max-width: 7.5rem;
+  }
+
+  .writing-workspace > header > div:first-child > div:last-child {
+    gap: 0.25rem;
+  }
+
+  .writing-document-controls {
+    padding-inline: 0.5rem;
+    scrollbar-width: thin;
+  }
+
+  .superdoc-writing-shell .superdoc__layers {
+    overflow-x: hidden !important;
+    overscroll-behavior: contain;
+  }
+
+  .writing-workspace .superdoc-writing-shell :is(
+    .superdoc__layers,
+    .superdoc__document,
+    .superdoc__sub-document,
+    .v2-super-editor,
+    .v2-super-editor__visuals,
+    .v2-super-editor__stage
+  ) {
+    box-sizing: border-box;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
+  .writing-workspace .superdoc-writing-shell .superdoc-layout[data-v2-paint-wrapper="true"] {
+    box-sizing: border-box;
+    width: 100% !important;
+    min-width: 100% !important;
+    align-items: center !important;
+  }
+
+  .superdoc-writing-shell .superdoc-page {
+    flex: none !important;
+    max-width: none !important;
+  }
+
+  .superdoc-writing-shell .superdoc-writing-status {
+    right: 0.5rem;
+    bottom: 0.5rem;
   }
 }
 

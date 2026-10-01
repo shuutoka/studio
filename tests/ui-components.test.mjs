@@ -204,7 +204,7 @@ test("creates and migrates persistent story boards", async () => {
   project.boards[0].folderId = "folder-timeline";
 
   const normalized = normalizeProject(project);
-  assert.equal(normalized.schemaVersion, 9);
+  assert.equal(normalized.schemaVersion, 10);
   assert.equal(normalized.boards[0].name, "Ligne temporelle");
   assert.equal(normalized.boards[0].nodes.length, 2);
   assert.equal(normalized.boards[0].edges[0].label, "Puis");
@@ -287,7 +287,7 @@ test("renders the legal notice and requires feedback privacy consent", async () 
   assert.match(app, /globalView === "legal"/);
   assert.match(settingsView, /privacyAccepted/);
   assert.match(settingsView, /J’accepte que les informations saisies/);
-  assert.match(serviceWorker, /enfer-fatal-studio-review-tools/);
+  assert.match(serviceWorker, /enfer-fatal-studio-mobile-drawing-docx/);
 });
 
 test("ships the native SuperDoc writing workspace and embeds documents in EFS backups", async () => {
@@ -304,7 +304,7 @@ test("ships the native SuperDoc writing workspace and embeds documents in EFS ba
   assert.match(superdocEditor, /"ai"/);
   assert.match(superdocEditor, /persistWritingDocument/);
   assert.match(writingDocument, /writing-docx/);
-  assert.match(projectFile, /formatVersion:\s*9/);
+  assert.match(projectFile, /formatVersion:\s*10/);
 });
 
 test("keeps SuperDoc inside the Studio viewport without continuous fit-width feedback", async () => {
@@ -327,6 +327,7 @@ test("keeps SuperDoc inside the Studio viewport without continuous fit-width fee
   assert.match(css, /\[data-v2-paint-wrapper="true"\][\s\S]*margin-inline: auto !important/);
   assert.match(css, /\.writing-workspace\.fixed[\s\S]*\.superdoc-layout\[data-v2-paint-wrapper="true"\][\s\S]*width: 100% !important/);
   assert.match(css, /\.writing-workspace\.fixed[\s\S]*\.superdoc__layers[\s\S]*\.v2-super-editor__stage[\s\S]*min-width: 0 !important/);
+  assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.superdoc-layout\[data-v2-paint-wrapper="true"\][\s\S]*align-items: center !important/);
   assert.match(css, /\.sd-v2-local-selection-caret[\s\S]*background: #ef4f5f !important/);
   assert.match(css, /\.toolbar-dropdown-option:not\(\.sd-render\):hover[\s\S]*background: #44252d !important/);
   assert.match(css, /\.toolbar-dropdown-menu--render-only[\s\S]*\.toolbar-dropdown-option\.sd-render[\s\S]*background: transparent !important/);
@@ -350,7 +351,7 @@ test("reconnects Writing 2.1 to Studio preferences and native DOCX metadata", as
   const project = normalizeProject({ ...createBlankProject("Migration 2.1", "novel"), schemaVersion: 7 });
   assert.equal(settings.schemaVersion, 8);
   assert.equal(settings.writingTheme, "follow");
-  assert.equal(project.schemaVersion, 9);
+  assert.equal(project.schemaVersion, 10);
   assert.equal(project.volumes[0].status, "draft");
   assert.equal(project.volumes[0].footerFormat, "page-of-total");
   assert.deepEqual(project.volumes[0].documentOutline, []);
@@ -418,11 +419,12 @@ test("adds review drawings, anchored comments and per-volume paper formats witho
 
   const project = createBlankProject("Relecture", "novel");
   project.volumes[0].pageFormat = "a5";
-  project.volumes[0].documentDrawings = [{ id: "trait-1", pageIndex: 0, color: "#ef4f5f", size: 4, points: [{ x: 0.1, y: 0.2 }, { x: 0.2, y: 0.3 }] }];
+  project.volumes[0].documentDrawings = [{ id: "trait-1", pageIndex: 0, anchorBlockId: "A1B2C3D4", color: "#ef4f5f", size: 4, points: [{ x: 0.1, y: 0.2 }, { x: 0.2, y: 0.3 }] }];
   const normalized = normalizeProject(project);
-  assert.equal(normalized.schemaVersion, 9);
+  assert.equal(normalized.schemaVersion, 10);
   assert.equal(normalized.volumes[0].pageFormat, "a5");
   assert.equal(normalized.volumes[0].documentDrawings.length, 1);
+  assert.equal(normalized.volumes[0].documentDrawings[0].anchorBlockId, "A1B2C3D4");
 
   await assert.rejects(readFile(path.join(root, "lib/google-drive.ts"), "utf8"), { code: "ENOENT" });
   assert.doesNotMatch(app, /Google Drive|googleDrive/);
@@ -435,6 +437,9 @@ test("adds review drawings, anchored comments and per-volume paper formats witho
   assert.match(editor, /comments:\s*\{ readOnly: false, allowResolve: true \}/);
   assert.match(editor, /efs-drawing-layer/);
   assert.match(editor, /documentDrawings/);
+  assert.match(editor, /preventEditorSelection/);
+  assert.match(editor, /getRenderedPageAnchors/);
+  assert.match(editor, /exportDocxWithDrawings/);
 });
 
 test("formats page numbers and dates for the native footer", async () => {
@@ -467,6 +472,53 @@ test("applies a selected paper format to every DOCX section", async () => {
     const result = strFromU8(archive["word/document.xml"]);
     assert.match(result, /w:w="8385"/);
     assert.match(result, /w:h="11910"/);
+  } finally {
+    if (previousDOMParser) globalThis.DOMParser = previousDOMParser;
+    else delete globalThis.DOMParser;
+    if (previousXMLSerializer) globalThis.XMLSerializer = previousXMLSerializer;
+    else delete globalThis.XMLSerializer;
+    dom.window.close();
+  }
+});
+
+test("embeds a transparent drawing overlay on its anchored DOCX page", async () => {
+  const { JSDOM } = await import("jsdom");
+  const { strFromU8, strToU8, unzipSync, zipSync } = await import("fflate");
+  const { applyDocxDrawingOverlays } = await vite.ssrLoadModule("/lib/writing-docx.ts");
+  const dom = new JSDOM();
+  const previousDOMParser = globalThis.DOMParser;
+  const previousXMLSerializer = globalThis.XMLSerializer;
+  globalThis.DOMParser = dom.window.DOMParser;
+  globalThis.XMLSerializer = dom.window.XMLSerializer;
+
+  try {
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"><w:body><w:p w14:paraId="A1B2C3D4"><w:r><w:t>Texte annoté</w:t></w:r></w:p><w:sectPr/></w:body></w:document>`;
+    const relationships = `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>`;
+    const contentTypes = `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/></Types>`;
+    const source = zipSync({
+      "word/document.xml": strToU8(documentXml),
+      "word/_rels/document.xml.rels": strToU8(relationships),
+      "[Content_Types].xml": strToU8(contentTypes),
+    });
+    const updated = await applyDocxDrawingOverlays(new Blob([source]), [{
+      pageIndex: 0,
+      anchorBlockId: "A1B2C3D4",
+      pngBytes: new Uint8Array([137, 80, 78, 71]),
+      widthPx: 794,
+      heightPx: 1123,
+    }]);
+    const archive = unzipSync(new Uint8Array(await updated.arrayBuffer()));
+    const resultDocument = strFromU8(archive["word/document.xml"]);
+    const resultRelationships = strFromU8(archive["word/_rels/document.xml.rels"]);
+    const resultContentTypes = strFromU8(archive["[Content_Types].xml"]);
+
+    assert.ok(archive["word/media/efs-drawing-page-1.png"]);
+    assert.match(resultDocument, /wp:anchor/);
+    assert.match(resultDocument, /relativeFrom="page"/);
+    assert.match(resultDocument, /Annotations manuscrites — page 1/);
+    assert.match(resultRelationships, /relationships\/image/);
+    assert.match(resultRelationships, /media\/efs-drawing-page-1\.png/);
+    assert.match(resultContentTypes, /Extension="png" ContentType="image\/png"/);
   } finally {
     if (previousDOMParser) globalThis.DOMParser = previousDOMParser;
     else delete globalThis.DOMParser;

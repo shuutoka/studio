@@ -10,7 +10,7 @@ globale `.efs` ou `.zip`.
 - types de projet : manga/BD, roman, script et écriture libre, avec surcharge par page ;
 - volumes et chapitres structurés dans de véritables documents DOCX ;
 - pagination, sections, marges, en-têtes, pieds de page, tableaux et images gérés par SuperDoc ;
-- éditeur DOCX natif : styles Titre, Sous-titre, Chapitre et Titre 1 à 4, polices du Studio, tailles, mise en forme, couleurs, listes et recherche ;
+- éditeur DOCX natif : styles Titre, Sous-titre et Titre 1 à 4, polices du Studio, tailles, mise en forme, couleurs, listes et recherche ;
 - feuille centrée, interface assortie au thème du Studio, véritable affichage de feuille clair/sombre, état du manuscrit et pied de page par volume ;
 - guillemets, raccourcis, tiret cadratin et palette de caractères spéciaux reliés aux paramètres du Studio ;
 - ajout de polices personnalisées TTF, OTF, WOFF et WOFF2 ;
@@ -33,6 +33,8 @@ globale `.efs` ou `.zip`.
 - gestion globale des polices intégrées et personnalisées ;
 - cartes projet personnalisables par couleur et bannière ;
 - mode focus pour l’écriture et navigation par styles de titres ;
+- relecture avec commentaires ancrés et dessin libre tactile/souris, intégré au DOCX exporté ;
+- mise à l’échelle automatique des feuilles sur smartphone ;
 - enregistrement automatique du DOCX dans IndexedDB ;
 - export fidèle en DOCX, impression/PDF depuis le volume ouvert et export TXT ;
 - import DOCX sans conversion HTML ; import ODT, TXT ou HTML converti en DOCX ;
