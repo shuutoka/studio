@@ -27,7 +27,6 @@ globale `.efs` ou `.zip`.
 - état `Enregistré` / `Non enregistré` ;
 - avertissement du navigateur avant de quitter avec des changements non sauvegardés ;
 - sauvegarde globale de tous les projets dans un fichier `.efs` non compressé ou `.zip` ;
-- sauvegarde et chargement `.efs` sur Google Drive avec accès limité aux fichiers du Studio ;
 - écran d’ouverture proposant un fichier du PC, un espace vide ou la copie locale de secours ;
 - bouton et état de sauvegarde toujours visibles, avec raccourci configurable ;
 - paramètres inclus dans la sauvegarde : format, nom, thèmes, zoom, sons et raccourcis ;

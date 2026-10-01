@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BookOpen, ChevronDown, ChevronRight, FileText, Focus, ListTree, LoaderCircle,
   Minimize2, MoreHorizontal, Pencil, Plus, Settings2, Trash2,
@@ -36,7 +36,7 @@ import { writingDocumentMediaId } from "@/lib/writing-document-id";
 import {
   createEmptyPage, createEmptyVolume, createId, getVolumePages,
   getWritingDocumentStats, stripHtml, type StudioProject, type StudioSettings,
-  type StudioVolume, type WritingCounterKey,
+  type StudioVolume, type WritingCounterKey, type PageFormat, type WritingDrawingStroke,
 } from "@/lib/studio";
 import type { ImportedWritingDocument } from "@/lib/writing-import";
 
@@ -82,9 +82,15 @@ export function WritingWorkspace({
   const [renameDraft, setRenameDraft] = useState("");
   const [deleteVolumeId, setDeleteVolumeId] = useState<string | null>(null);
   const [deleteVolumeConfirm, setDeleteVolumeConfirm] = useState("");
+  const [commentsVisible, setCommentsVisible] = useState(false);
+  const [drawingEnabled, setDrawingEnabled] = useState(false);
+  const [drawingColor, setDrawingColor] = useState("#ef4f5f");
+  const [drawingSize, setDrawingSize] = useState(4);
 
   useEffect(() => {
     if (!activeVolume) {
+      // Document loading is an external IndexedDB synchronization boundary.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDocumentBlob(null);
       return;
     }
@@ -134,13 +140,14 @@ export function WritingWorkspace({
   }
 
   function addVolume() {
-    const volume = createEmptyVolume(project.volumes.length + 1);
+    const volume = createEmptyVolume(project.volumes.length + 1, undefined, project.defaultPageFormat);
     updateProject((draft) => draft.volumes.push(volume));
     onSelectPage(firstPageId(volume)!);
   }
 
   async function importWriting(document: ImportedWritingDocument) {
     const volume = createEmptyVolume(project.volumes.length + 1, document.title);
+    volume.pageFormat = document.pageFormat === "free" ? "a4" : document.pageFormat;
     volume.chapters[0].pages = document.pages.map((content, index) => ({
       ...createEmptyPage(index + 1),
       content,
@@ -229,6 +236,45 @@ export function WritingWorkspace({
     });
   }
 
+  async function applyVolumePageFormat(format: PageFormat) {
+    if (!activeVolume) throw new Error("Aucun volume n’est ouvert.");
+    const activeDocument = getActiveWritingDocument(activeVolume.id);
+    if (!activeDocument) throw new Error("Attendez que le document soit complètement ouvert.");
+    await activeDocument.applyPageFormat(format);
+    updateProject((draft) => {
+      const volume = draft.volumes.find((candidate) => candidate.id === activeVolume.id);
+      if (!volume) return;
+      volume.pageFormat = format;
+      volume.chapters.forEach((chapter) => chapter.pages.forEach((page) => { page.formatOverride = format; }));
+    });
+  }
+
+  const activeVolumeId = activeVolume?.id ?? null;
+
+  const addDrawing = useCallback((stroke: WritingDrawingStroke) => {
+    if (!activeVolumeId) return;
+    updateProject((draft) => {
+      const volume = draft.volumes.find((candidate) => candidate.id === activeVolumeId);
+      if (volume) volume.documentDrawings.push(stroke);
+    });
+  }, [activeVolumeId, updateProject]);
+
+  const undoDrawing = useCallback(() => {
+    if (!activeVolumeId) return;
+    updateProject((draft) => {
+      const volume = draft.volumes.find((candidate) => candidate.id === activeVolumeId);
+      volume?.documentDrawings.pop();
+    });
+  }, [activeVolumeId, updateProject]);
+
+  const clearDrawings = useCallback(() => {
+    if (!activeVolumeId) return;
+    updateProject((draft) => {
+      const volume = draft.volumes.find((candidate) => candidate.id === activeVolumeId);
+      if (volume) volume.documentDrawings = [];
+    });
+  }, [activeVolumeId, updateProject]);
+
   function navigateToHeading(volumeId: string, entry: OutlineEntry) {
     selectVolume(volumeId);
     setNavigationTarget({ text: entry.label, token: Date.now() });
@@ -270,12 +316,23 @@ export function WritingWorkspace({
           volume={activeVolume}
           settings={settings}
           onStatusChange={updateVolumeStatus}
+          onPageFormatChange={applyVolumePageFormat}
           onPaperModeChange={(mode) => updateSettings((draft) => {
             draft.paperColorMode = mode;
             draft.paperBackground = mode === "light" ? "#ffffff" : "#15131a";
           })}
           onInsert={insertIntoDocument}
           onApplyFooter={applyVolumeFooter}
+          commentsVisible={commentsVisible}
+          onToggleComments={() => setCommentsVisible((current) => !current)}
+          drawingEnabled={drawingEnabled}
+          drawingColor={drawingColor}
+          drawingSize={drawingSize}
+          onDrawingEnabledChange={setDrawingEnabled}
+          onDrawingColorChange={setDrawingColor}
+          onDrawingSizeChange={setDrawingSize}
+          onUndoDrawing={undoDrawing}
+          onClearDrawings={clearDrawings}
         />}
       </header>
 
@@ -290,6 +347,9 @@ export function WritingWorkspace({
             documentBlob={documentBlob}
             navigationTarget={navigationTarget}
             onSnapshot={applySnapshot}
+            commentsVisible={commentsVisible}
+            drawingTool={{ enabled: drawingEnabled, color: drawingColor, size: drawingSize }}
+            onAddDrawing={addDrawing}
             onError={(message) => toast.error(message)}
           />
             : <div className="grid flex-1 place-items-center bg-[#28252d] p-8 text-center text-[#8f8996]">{documentError ? <div><FileText className="mx-auto mb-3 size-7" /><p>{documentError}</p><Button className="mt-4" variant="outline" onClick={() => activeVolume && loadOrCreateWritingDocument(project, activeVolume.id).then(setDocumentBlob)}>Réessayer</Button></div> : <span className="flex items-center gap-2"><LoaderCircle className="size-4 animate-spin" /> Conversion et ouverture du DOCX…</span>}</div>}

@@ -2,7 +2,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 
 import { DOCX_MIME } from "@/lib/writing-document";
 import { footerFormatForType, formatFooterText } from "@/lib/writing-footer";
-import type { FooterFormat, FooterType } from "@/lib/studio";
+import { PAGE_FORMATS, type FooterFormat, type FooterType, type PageFormat } from "@/lib/studio";
 
 const WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 const OFFICE_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -156,6 +156,36 @@ export async function applyDocxFooter(
   updateFooterContentType(archive, true);
   archive[`word/${EFS_FOOTER_TARGET}`] = strToU8(footerXml(type, text, format, pageCount));
   archive["word/_rels/document.xml.rels"] = strToU8(serializeXml(relationships));
+  return docxBlob(zipSync(archive, { level: 6 }));
+}
+
+export async function applyDocxPageFormat(blob: Blob, pageFormat: PageFormat): Promise<Blob> {
+  const format = PAGE_FORMATS[pageFormat];
+  if (!format.height) throw new Error("Le format libre n’est pas disponible pour un document DOCX paginé.");
+  const archive = await readDocx(blob);
+  const documentBytes = archive["word/document.xml"];
+  if (!documentBytes) throw new Error("Le contenu du document DOCX est manquant.");
+  const documentXml = parseXml(strFromU8(documentBytes));
+  let sections = elementsByLocalName(documentXml, "sectPr");
+  if (!sections.length) {
+    const body = elementsByLocalName(documentXml, "body")[0];
+    if (!body) throw new Error("La structure du document DOCX est invalide.");
+    const section = documentXml.createElementNS(WORD_NS, "w:sectPr");
+    body.append(section);
+    sections = [section];
+  }
+  for (const section of sections) {
+    let pageSize = directChild(section, "pgSz");
+    if (!pageSize) {
+      pageSize = documentXml.createElementNS(WORD_NS, "w:pgSz");
+      const firstPageProperty = [...section.children].find((child) => ["pgMar", "paperSrc", "pgBorders"].includes(child.localName));
+      section.insertBefore(pageSize, firstPageProperty ?? null);
+    }
+    pageSize.setAttributeNS(WORD_NS, "w:w", String(Math.round(format.width * 15)));
+    pageSize.setAttributeNS(WORD_NS, "w:h", String(Math.round(format.height * 15)));
+    pageSize.removeAttributeNS(WORD_NS, "orient");
+  }
+  archive["word/document.xml"] = strToU8(serializeXml(documentXml));
   return docxBlob(zipSync(archive, { level: 6 }));
 }
 

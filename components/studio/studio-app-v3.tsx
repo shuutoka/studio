@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ChevronRight, CloudDownload, FileArchive, FileText, HardDrive, Home, Images, Import, Library,
+  ChevronRight, FileArchive, FileText, HardDrive, Home, Images, Import, Library,
   Plus, Save, Scale, Settings,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -34,12 +34,7 @@ import {
 import { Toaster } from "@/components/ui/sonner";
 import { playInterfaceSound } from "@/lib/interface-sound";
 import { optimizeImage } from "@/lib/image-optimization";
-import {
-  authorizeGoogleDrive, canPickFromGoogleDrive, downloadGoogleDriveBackup,
-  GoogleDrivePickerCancelledError, pickGoogleDriveBackup, resolveGoogleDriveConfiguration,
-  saveBackupToGoogleDrive, type GoogleDriveBackupFile,
-} from "@/lib/google-drive";
-import { createStudioBackup, downloadStudioBackup, readStudioBackup } from "@/lib/project-file";
+import { downloadStudioBackup, readStudioBackup } from "@/lib/project-file";
 import { isShortcutRecorderTarget, matchesShortcut } from "@/lib/shortcuts";
 import { flushOpenWritingDocuments } from "@/lib/writing-editor-registry";
 import {
@@ -76,11 +71,8 @@ export function StudioAppV3() {
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectType, setNewProjectType] = useState<ProjectType>("manga");
   const [deleteTarget, setDeleteTarget] = useState<StudioProject | null>(null);
-  const [driveBusy, setDriveBusy] = useState(false);
-  const [startupDriveReady, setStartupDriveReady] = useState(() => canPickFromGoogleDrive(resolveGoogleDriveConfiguration(createDefaultSettings())));
   const recoveryProjects = useRef<StudioProject[]>([]);
   const recoverySettings = useRef<StudioSettings>(createDefaultSettings());
-  const driveTokenRef = useRef<string | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
 
   const activeProject = useMemo(
@@ -100,7 +92,6 @@ export function StudioAppV3() {
         recoveryProjects.current = storedProjects.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
         recoverySettings.current = migrateLegacyFonts(storedProjects, storedSettings);
         setBackupAvailable(storedProjects.length > 0 || storedSettings.revision > 1);
-        setStartupDriveReady(canPickFromGoogleDrive(resolveGoogleDriveConfiguration(recoverySettings.current)));
       })
       .catch(() => { if (!cancelled) toast.error("La copie locale de secours n’est pas disponible."); });
     return () => { cancelled = true; };
@@ -189,63 +180,6 @@ export function StudioAppV3() {
       toast.error("La sauvegarde globale n’a pas pu être créée.");
     }
   }, [projects, settings]);
-
-  async function saveAllToDrive() {
-    setDriveBusy(true);
-    try {
-      await flushOpenWritingDocuments();
-      const configuration = resolveGoogleDriveConfiguration(settings);
-      const token = await authorizeGoogleDrive(configuration.clientId);
-      driveTokenRef.current = token;
-      const firstArchive = await createStudioBackup(projects, settings, "efs");
-      let driveFile = await saveBackupToGoogleDrive(token, firstArchive.blob, firstArchive.filename, settings.googleDriveFileId || undefined);
-      const revision = settings.googleDriveFileId === driveFile.id ? settings.revision : settings.revision + 1;
-      const finalSettings = { ...settings, googleDriveFileId: driveFile.id, revision };
-      if (settings.googleDriveFileId !== driveFile.id) {
-        const finalArchive = await createStudioBackup(projects, finalSettings, "efs");
-        driveFile = await saveBackupToGoogleDrive(token, finalArchive.blob, finalArchive.filename, driveFile.id);
-      }
-      setProjects((current) => current.map((project) => ({ ...project, savedRevision: project.revision })));
-      setSettings({ ...finalSettings, savedRevision: finalSettings.revision });
-      toast.success(`Sauvegarde .efs enregistrée sur Google Drive : ${driveFile.name}`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "La sauvegarde Google Drive a échoué.");
-    } finally {
-      setDriveBusy(false);
-    }
-  }
-
-  async function openDriveBackups(sourceSettings: StudioSettings = settings) {
-    setDriveBusy(true);
-    try {
-      const configuration = resolveGoogleDriveConfiguration(sourceSettings);
-      const picked = await pickGoogleDriveBackup(configuration, driveTokenRef.current);
-      driveTokenRef.current = picked.token;
-      await loadDriveBackup(picked.file, picked.token);
-    } catch (error) {
-      if (!(error instanceof GoogleDrivePickerCancelledError)) {
-        toast.error(error instanceof Error ? error.message : "Google Drive n’est pas accessible.");
-      }
-    } finally {
-      setDriveBusy(false);
-    }
-  }
-
-  async function loadDriveBackup(file: GoogleDriveBackupFile, authorizedToken?: string) {
-    setDriveBusy(true);
-    try {
-      const configuration = resolveGoogleDriveConfiguration(settings);
-      const token = authorizedToken ?? driveTokenRef.current ?? await authorizeGoogleDrive(configuration.clientId);
-      driveTokenRef.current = token;
-      const downloaded = await downloadGoogleDriveBackup(token, file);
-      await importBackup(downloaded);
-      setSettings((current) => ({ ...current, googleDriveFileId: file.id }));
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Cette sauvegarde Drive n’a pas pu être chargée.");
-    } finally {
-      setDriveBusy(false);
-    }
-  }
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -448,7 +382,7 @@ export function StudioAppV3() {
           ) : globalView === "media" ? (
             <MediaGallery projects={projects} onOpenProject={(project) => openProject(project)} onOpenCharacter={(project, characterId) => { openProject(project, "characters"); setSelectedCharacterId(characterId); }} onLinkCharacterImage={setCharacterImageLink} />
           ) : globalView === "settings" ? (
-            <SettingsView settings={settings} updateSettings={updateSettings} onUploadFont={uploadFont} onRemoveFont={removeFont} onSaveDrive={saveAllToDrive} onLoadDrive={() => openDriveBackups(settings)} onOpenLegal={() => showGlobal("legal")} driveBusy={driveBusy} />
+            <SettingsView settings={settings} updateSettings={updateSettings} onUploadFont={uploadFont} onRemoveFont={removeFont} onOpenLegal={() => showGlobal("legal")} />
           ) : globalView === "legal" ? (
             <LegalInformation />
           ) : (
@@ -464,7 +398,6 @@ export function StudioAppV3() {
           <DialogHeader><div className="mb-2 grid size-12 place-items-center rounded-2xl bg-[#ef4f5f]/12 text-[#ef6977]"><FileArchive className="size-6" /></div><DialogTitle>Ouvrir Enfer Fatal Studio</DialogTitle><DialogDescription className="text-[#9c96a5]">Choisissez les données à charger pour cette session.</DialogDescription></DialogHeader>
           <div className="grid gap-3 py-2">
             <Button className="h-auto justify-start gap-4 bg-[#ef4f5f] p-4 text-left text-white hover:bg-[#ff6675]" onClick={() => importInputRef.current?.click()}><Import className="size-5" /><span><span className="block font-semibold">Charger une sauvegarde du PC</span><span className="mt-1 block text-xs font-normal text-white/75">Fichier .efs, .zip ou ancienne archive .efstudio.zip</span></span></Button>
-            <Button variant="outline" className="h-auto justify-start gap-4 border-[#4ca9ad]/25 bg-[#4ca9ad]/6 p-4 text-left" disabled={driveBusy || !startupDriveReady} onClick={() => void openDriveBackups(recoverySettings.current)}><CloudDownload className="size-5 text-[#74c9cd]" /><span><span className="block font-semibold">Charger depuis Google Drive</span><span className="mt-1 block text-xs font-normal text-[#8f8996]">{startupDriveReady ? "Ouvrir le sélecteur Google et choisir un fichier .efs" : "Configurez d’abord Google Drive dans les paramètres"}</span></span></Button>
             <Button variant="outline" className="h-auto justify-start gap-4 border-white/10 bg-white/3 p-4 text-left" disabled={!backupAvailable} onClick={restoreRecovery}><HardDrive className="size-5" /><span><span className="block font-semibold">Charger la sauvegarde de secours</span><span className="mt-1 block text-xs font-normal text-[#8f8996]">{backupAvailable ? "Récupérer la dernière copie locale automatique" : "Aucune copie locale disponible"}</span></span></Button>
             <Button variant="ghost" className="h-auto justify-start gap-4 p-4 text-left" onClick={startEmpty}><Plus className="size-5" /><span><span className="block font-semibold">Ne charger aucune donnée</span><span className="mt-1 block text-xs font-normal text-[#77717f]">Commencer cette session avec un espace vide</span></span></Button>
           </div>

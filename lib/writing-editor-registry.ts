@@ -1,4 +1,4 @@
-import type { FooterFormat, FooterType } from "@/lib/studio";
+import type { FooterFormat, FooterType, PageFormat } from "@/lib/studio";
 
 export type ActiveWritingDocument = {
   flush: () => Promise<void>;
@@ -8,6 +8,7 @@ export type ActiveWritingDocument = {
   navigateToText: (text: string) => void;
   insertText: (text: string) => boolean;
   applyFooter: (type: FooterType, text: string, format: FooterFormat) => Promise<void>;
+  applyPageFormat: (format: PageFormat) => Promise<void>;
 };
 
 const activeDocuments = new Map<string, ActiveWritingDocument>();

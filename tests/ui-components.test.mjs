@@ -204,7 +204,7 @@ test("creates and migrates persistent story boards", async () => {
   project.boards[0].folderId = "folder-timeline";
 
   const normalized = normalizeProject(project);
-  assert.equal(normalized.schemaVersion, 8);
+  assert.equal(normalized.schemaVersion, 9);
   assert.equal(normalized.boards[0].name, "Ligne temporelle");
   assert.equal(normalized.boards[0].nodes.length, 2);
   assert.equal(normalized.boards[0].edges[0].label, "Puis");
@@ -229,9 +229,8 @@ test("exposes tree and relationship board controls", async () => {
   assert.match(source, /if \(!board\) return[\s\S]*?<CreateBoardDialog/);
 });
 
-test("wires manuscript import, Drive backups, WebP media and project card customization", async () => {
+test("wires manuscript import, WebP media and project card customization", async () => {
   const writingImport = await readFile(path.join(root, "lib/writing-import.ts"), "utf8");
-  const drive = await readFile(path.join(root, "lib/google-drive.ts"), "utf8");
   const optimizer = await readFile(path.join(root, "lib/image-optimization.ts"), "utf8");
   const gallery = await readFile(path.join(root, "components/studio/media-gallery.tsx"), "utf8");
   const characters = await readFile(path.join(root, "components/studio/character-manager.tsx"), "utf8");
@@ -239,8 +238,6 @@ test("wires manuscript import, Drive backups, WebP media and project card custom
 
   assert.match(writingImport, /docxPages/);
   assert.match(writingImport, /odtPages/);
-  assert.match(drive, /drive\.file/);
-  assert.match(drive, /uploadType=multipart/);
   assert.match(optimizer, /image\/webp/);
   assert.match(gallery, /Images uniquement/);
   assert.match(gallery, /centré et recadré/);
@@ -249,31 +246,23 @@ test("wires manuscript import, Drive backups, WebP media and project card custom
   assert.match(home, /Personnaliser la carte projet/);
 });
 
-test("ships the Pansement writing, Drive, feedback and image-link fixes", async () => {
+test("ships the Pansement writing, feedback and image-link fixes", async () => {
   const { createDefaultSettings, normalizeSettings, PAGE_FORMATS } = await vite.ssrLoadModule("/lib/studio.ts");
   const writingImport = await readFile(path.join(root, "lib/writing-import.ts"), "utf8");
   const importButton = await readFile(path.join(root, "components/studio/writing-import-button.tsx"), "utf8");
   const editor = await readFile(path.join(root, "components/studio/rich-text-editor.tsx"), "utf8");
-  const drive = await readFile(path.join(root, "lib/google-drive.ts"), "utf8");
-  const app = await readFile(path.join(root, "components/studio/studio-app-v3.tsx"), "utf8");
   const settingsView = await readFile(path.join(root, "components/studio/settings-view.tsx"), "utf8");
   const feedback = await readFile(path.join(root, "lib/feedback.ts"), "utf8");
   const mediaPreview = await readFile(path.join(root, "components/studio/media-preview.tsx"), "utf8");
 
   assert.deepEqual([PAGE_FORMATS.a4.width, PAGE_FORMATS.a4.height], [794, 1123]);
   const settings = createDefaultSettings();
-  settings.googleDriveApiKey = "picker-key";
-  settings.googleDriveAppId = "123456";
-  assert.equal(normalizeSettings(settings).googleDriveApiKey, "picker-key");
-  assert.equal(normalizeSettings(settings).googleDriveAppId, "123456");
+  assert.equal(normalizeSettings(settings).schemaVersion, 8);
   assert.match(writingImport, /background-color/);
   assert.match(writingImport, /removeImportedFormatting/);
   assert.match(importButton, /Supprimer la mise en forme/);
   assert.match(importButton, /Format des pages/);
   assert.match(editor, /selectWholeDocument/);
-  assert.match(drive, /PickerBuilder/);
-  assert.match(drive, /setDeveloperKey/);
-  assert.match(app, /Charger depuis Google Drive/);
   assert.match(settingsView, /Feedback/);
   assert.match(feedback, /formsubmit\.co\/ajax\/studio@report\.lotaku\.fr/);
   assert.match(mediaPreview, /Ajouter à une galerie/);
@@ -293,12 +282,12 @@ test("renders the legal notice and requires feedback privacy consent", async () 
   assert.match(html, /GitHub, Inc\./);
   assert.match(html, /OVH SAS/);
   assert.match(html, /FormSubmit/);
-  assert.match(html, /Google Drive/);
+  assert.doesNotMatch(html, /Google Drive/);
   assert.match(app, /Informations légales et confidentialité/);
   assert.match(app, /globalView === "legal"/);
   assert.match(settingsView, /privacyAccepted/);
   assert.match(settingsView, /J’accepte que les informations saisies/);
-  assert.match(serviceWorker, /enfer-fatal-studio-writing-2/);
+  assert.match(serviceWorker, /enfer-fatal-studio-review-tools/);
 });
 
 test("ships the native SuperDoc writing workspace and embeds documents in EFS backups", async () => {
@@ -315,7 +304,7 @@ test("ships the native SuperDoc writing workspace and embeds documents in EFS ba
   assert.match(superdocEditor, /"ai"/);
   assert.match(superdocEditor, /persistWritingDocument/);
   assert.match(writingDocument, /writing-docx/);
-  assert.match(projectFile, /formatVersion:\s*8/);
+  assert.match(projectFile, /formatVersion:\s*9/);
 });
 
 test("keeps SuperDoc inside the Studio viewport without continuous fit-width feedback", async () => {
@@ -359,9 +348,9 @@ test("reconnects Writing 2.1 to Studio preferences and native DOCX metadata", as
 
   const settings = normalizeSettings({ ...createDefaultSettings(), schemaVersion: 1 });
   const project = normalizeProject({ ...createBlankProject("Migration 2.1", "novel"), schemaVersion: 7 });
-  assert.equal(settings.schemaVersion, 7);
+  assert.equal(settings.schemaVersion, 8);
   assert.equal(settings.writingTheme, "follow");
-  assert.equal(project.schemaVersion, 8);
+  assert.equal(project.schemaVersion, 9);
   assert.equal(project.volumes[0].status, "draft");
   assert.equal(project.volumes[0].footerFormat, "page-of-total");
   assert.deepEqual(project.volumes[0].documentOutline, []);
@@ -407,6 +396,7 @@ test("reconnects Writing 2.1 to Studio preferences and native DOCX metadata", as
   assert.match(workspace, /ensureStudioDocxStyles/);
   assert.match(docx, /extractDocxOutline/);
   assert.match(docx, /applyDocxFooter/);
+  assert.match(docx, /applyDocxPageFormat/);
   assert.match(docx, /fldCharType=\"separate\"/);
   assert.match(docx, /w:dirty=\"true\"/);
   assert.match(docx, /ensureQuickFormatStyle/);
@@ -416,6 +406,35 @@ test("reconnects Writing 2.1 to Studio preferences and native DOCX metadata", as
   assert.match(css, /data-paper-color-mode="dark"[\s\S]*\.superdoc-page \*[\s\S]*-webkit-text-fill-color/);
   assert.match(css, /Dropdowns are teleported under <body>/);
   assert.doesNotMatch(editor, /ruler:\s*true/);
+});
+
+test("adds review drawings, anchored comments and per-volume paper formats without Google Drive", async () => {
+  const { createBlankProject, normalizeProject } = await vite.ssrLoadModule("/lib/studio.ts");
+  const app = await readFile(path.join(root, "components/studio/studio-app-v3.tsx"), "utf8");
+  const settings = await readFile(path.join(root, "components/studio/settings-view.tsx"), "utf8");
+  const controls = await readFile(path.join(root, "components/studio/writing-document-controls.tsx"), "utf8");
+  const editor = await readFile(path.join(root, "components/studio/superdoc-writing-editor.tsx"), "utf8");
+  const workflow = await readFile(path.join(root, ".github/workflows/deploy-pages.yml"), "utf8");
+
+  const project = createBlankProject("Relecture", "novel");
+  project.volumes[0].pageFormat = "a5";
+  project.volumes[0].documentDrawings = [{ id: "trait-1", pageIndex: 0, color: "#ef4f5f", size: 4, points: [{ x: 0.1, y: 0.2 }, { x: 0.2, y: 0.3 }] }];
+  const normalized = normalizeProject(project);
+  assert.equal(normalized.schemaVersion, 9);
+  assert.equal(normalized.volumes[0].pageFormat, "a5");
+  assert.equal(normalized.volumes[0].documentDrawings.length, 1);
+
+  await assert.rejects(readFile(path.join(root, "lib/google-drive.ts"), "utf8"), { code: "ENOENT" });
+  assert.doesNotMatch(app, /Google Drive|googleDrive/);
+  assert.doesNotMatch(settings, /Google Drive|googleDrive/);
+  assert.doesNotMatch(workflow, /GOOGLE_DRIVE/);
+  assert.match(controls, /Format de la feuille/);
+  assert.match(controls, /Dessin libre/);
+  assert.match(controls, /Commentaires/);
+  assert.match(editor, /createFromCapture/);
+  assert.match(editor, /comments:\s*\{ readOnly: false, allowResolve: true \}/);
+  assert.match(editor, /efs-drawing-layer/);
+  assert.match(editor, /documentDrawings/);
 });
 
 test("formats page numbers and dates for the native footer", async () => {
@@ -428,4 +447,31 @@ test("formats page numbers and dates for the native footer", async () => {
   assert.equal(formatFooterText("page", "number-only", "", 3, 12), "3");
   assert.equal(formatFooterText("date", "date-short", "", 1, 1, date), "11/09/2026");
   assert.equal(formatFooterText("date", "date-iso", "", 1, 1, date), "2026-09-11");
+});
+
+test("applies a selected paper format to every DOCX section", async () => {
+  const { JSDOM } = await import("jsdom");
+  const { strFromU8, strToU8, unzipSync, zipSync } = await import("fflate");
+  const { applyDocxPageFormat } = await vite.ssrLoadModule("/lib/writing-docx.ts");
+  const dom = new JSDOM();
+  const previousDOMParser = globalThis.DOMParser;
+  const previousXMLSerializer = globalThis.XMLSerializer;
+  globalThis.DOMParser = dom.window.DOMParser;
+  globalThis.XMLSerializer = dom.window.XMLSerializer;
+
+  try {
+    const xml = `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p/><w:sectPr><w:pgSz w:w="11910" w:h="16845"/></w:sectPr></w:body></w:document>`;
+    const bytes = zipSync({ "word/document.xml": strToU8(xml) });
+    const updated = await applyDocxPageFormat(new Blob([bytes]), "a5");
+    const archive = unzipSync(new Uint8Array(await updated.arrayBuffer()));
+    const result = strFromU8(archive["word/document.xml"]);
+    assert.match(result, /w:w="8385"/);
+    assert.match(result, /w:h="11910"/);
+  } finally {
+    if (previousDOMParser) globalThis.DOMParser = previousDOMParser;
+    else delete globalThis.DOMParser;
+    if (previousXMLSerializer) globalThis.XMLSerializer = previousXMLSerializer;
+    else delete globalThis.XMLSerializer;
+    dom.window.close();
+  }
 });

@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { LoaderCircle, Minus, Moon, PanelBottom, Sigma, Sun } from "lucide-react";
+import {
+  LoaderCircle, MessageSquareText, Minus, Moon, PanelBottom, PencilLine,
+  Sigma, Sun, Trash2, Undo2,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -9,7 +12,11 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DATE_FOOTER_FORMATS, footerFormatForType, formatFooterText, PAGE_FOOTER_FORMATS } from "@/lib/writing-footer";
-import type { FooterFormat, FooterType, PageStatus, StudioSettings, StudioVolume } from "@/lib/studio";
+import {
+  PAGE_FORMATS,
+  type FooterFormat, type FooterType, type PageFormat, type PageStatus,
+  type StudioSettings, type StudioVolume,
+} from "@/lib/studio";
 
 const specialCharacterGroups = {
   Typographie: ["« ", " »", "“", "”", "‘", "’", "‹", "›", "—", "–", "…", "•", "·", "‑", "§", "¶", "†", "‡", "№"],
@@ -32,16 +39,38 @@ export function WritingDocumentControls({
   volume,
   settings,
   onStatusChange,
+  onPageFormatChange,
   onPaperModeChange,
   onInsert,
   onApplyFooter,
+  commentsVisible,
+  onToggleComments,
+  drawingEnabled,
+  drawingColor,
+  drawingSize,
+  onDrawingEnabledChange,
+  onDrawingColorChange,
+  onDrawingSizeChange,
+  onUndoDrawing,
+  onClearDrawings,
 }: {
   volume: StudioVolume;
   settings: StudioSettings;
   onStatusChange: (status: PageStatus) => void;
+  onPageFormatChange: (format: PageFormat) => Promise<void>;
   onPaperModeChange: (mode: "light" | "dark") => void;
   onInsert: (text: string) => boolean;
   onApplyFooter: (type: FooterType, text: string, format: FooterFormat) => Promise<void>;
+  commentsVisible: boolean;
+  onToggleComments: () => void;
+  drawingEnabled: boolean;
+  drawingColor: string;
+  drawingSize: number;
+  onDrawingEnabledChange: (enabled: boolean) => void;
+  onDrawingColorChange: (color: string) => void;
+  onDrawingSizeChange: (size: number) => void;
+  onUndoDrawing: () => void;
+  onClearDrawings: () => void;
 }) {
   const [footerType, setFooterType] = useState<FooterType>(volume.footerType);
   const [footerText, setFooterText] = useState(volume.footerText);
@@ -50,8 +79,11 @@ export function WritingDocumentControls({
   );
   const [applyingFooter, setApplyingFooter] = useState(false);
   const [characterQuery, setCharacterQuery] = useState("");
+  const [applyingPageFormat, setApplyingPageFormat] = useState(false);
 
   useEffect(() => {
+    // The local draft is intentionally reset when another volume is opened.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setFooterType(volume.footerType);
     setFooterText(volume.footerText);
     setFooterFormat(footerFormatForType(volume.footerType, volume.footerFormat));
@@ -80,11 +112,30 @@ export function WritingDocumentControls({
     }
   }
 
+  async function applyPageFormat(format: PageFormat) {
+    setApplyingPageFormat(true);
+    try {
+      await onPageFormatChange(format);
+      toast.success(`Format ${PAGE_FORMATS[format].label} appliqué au volume.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Le format de feuille n’a pas pu être appliqué.");
+    } finally {
+      setApplyingPageFormat(false);
+    }
+  }
+
   return (
     <div className="writing-document-controls flex min-h-10 items-center gap-2 overflow-x-auto border-t border-white/6 px-3 py-1.5 sm:px-5">
       <Select value={volume.status} onValueChange={(value: PageStatus) => onStatusChange(value)}>
         <SelectTrigger size="sm" className="w-32 shrink-0 border-white/10 bg-white/3 text-xs" aria-label="État du manuscrit"><SelectValue /></SelectTrigger>
         <SelectContent>{Object.entries(statusLabels).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
+      </Select>
+
+      <Select value={volume.pageFormat} disabled={applyingPageFormat} onValueChange={(value: PageFormat) => void applyPageFormat(value)}>
+        <SelectTrigger size="sm" className="w-40 shrink-0 border-white/10 bg-white/3 text-xs" aria-label="Format de la feuille">
+          {applyingPageFormat ? <LoaderCircle className="animate-spin" /> : <SelectValue />}
+        </SelectTrigger>
+        <SelectContent>{(["a4", "a5", "pocket", "novel", "large"] as const).map((value) => <SelectItem key={value} value={value}>{PAGE_FORMATS[value].label}</SelectItem>)}</SelectContent>
       </Select>
 
       <div className="flex shrink-0 items-center rounded-md border border-white/10 bg-white/3 p-0.5" aria-label="Couleur de la feuille">
@@ -120,6 +171,28 @@ export function WritingDocumentControls({
       </Popover>
 
       <div className="h-5 w-px shrink-0 bg-white/8" />
+      <Button
+        size="sm"
+        variant={commentsVisible ? "default" : "ghost"}
+        className={commentsVisible ? "shrink-0 bg-[#ef4f5f] text-xs text-white" : "shrink-0 text-xs"}
+        aria-pressed={commentsVisible}
+        onClick={onToggleComments}
+      ><MessageSquareText /> Commentaires</Button>
+
+      <Popover>
+        <PopoverTrigger asChild><Button size="sm" variant={drawingEnabled ? "default" : "ghost"} className={drawingEnabled ? "shrink-0 bg-[#ef4f5f] text-xs text-white" : "shrink-0 text-xs"}><PencilLine /> Dessin libre</Button></PopoverTrigger>
+        <PopoverContent align="start" className="w-80 border-white/10 bg-[#1b1821] text-[#eeeaf2]">
+          <PopoverHeader className="mb-4"><PopoverTitle>Annotation au crayon</PopoverTitle></PopoverHeader>
+          <div className="grid gap-4">
+            <Button variant={drawingEnabled ? "default" : "outline"} className={drawingEnabled ? "bg-[#ef4f5f] text-white" : "border-white/10 bg-transparent"} onClick={() => onDrawingEnabledChange(!drawingEnabled)}><PencilLine /> {drawingEnabled ? "Quitter le mode dessin" : "Commencer à dessiner"}</Button>
+            <div><p className="mb-2 text-xs text-[#aaa4b4]">Couleur</p><div className="flex flex-wrap gap-2">{["#ef4f5f", "#ffb020", "#f3e55a", "#58c68a", "#5aa9ff", "#b783ff", "#29262b"].map((color) => <button key={color} type="button" aria-label={`Couleur ${color}`} aria-pressed={drawingColor === color} className="size-8 rounded-full border border-white/20 outline-none transition hover:scale-105 focus-visible:ring-2 focus-visible:ring-[#ef4f5f] aria-pressed:ring-2 aria-pressed:ring-white" style={{ backgroundColor: color }} onClick={() => onDrawingColorChange(color)} />)}</div></div>
+            <div><p className="mb-2 text-xs text-[#aaa4b4]">Épaisseur</p><div className="grid grid-cols-4 gap-2">{[{ value: 2, label: "Fine" }, { value: 4, label: "Normale" }, { value: 8, label: "Large" }, { value: 14, label: "Très large" }].map((item) => <button key={item.value} type="button" aria-pressed={drawingSize === item.value} className="grid h-10 place-items-center rounded-md border border-white/9 bg-white/3 text-[10px] text-[#aaa4b4] hover:bg-white/7 aria-pressed:border-[#ef4f5f]/60 aria-pressed:bg-[#ef4f5f]/10 aria-pressed:text-white" onClick={() => onDrawingSizeChange(item.value)}><span className="rounded-full bg-current" style={{ width: Math.max(4, item.value), height: Math.max(4, item.value) }} /><span className="sr-only">{item.label}</span></button>)}</div></div>
+            <div className="flex gap-2"><Button variant="outline" className="flex-1 border-white/10 bg-transparent" disabled={!volume.documentDrawings.length} onClick={onUndoDrawing}><Undo2 /> Annuler un trait</Button><Button variant="ghost" className="text-[#d27a84]" disabled={!volume.documentDrawings.length} onClick={() => { if (window.confirm("Effacer toutes les annotations dessinées de ce volume ?")) onClearDrawings(); }}><Trash2 /> Tout effacer</Button></div>
+            <p className="text-[11px] leading-4 text-[#77717f]">Les traits restent dans la sauvegarde EFS et s’affichent sur les pages. Ils ne modifient pas le fichier DOCX exporté.</p>
+          </div>
+        </PopoverContent>
+      </Popover>
+
       <Button size="sm" variant="ghost" className="shrink-0 text-xs" title={`Insérer un tiret cadratin (${settings.shortcuts.emDash})`} onClick={() => insert("—")}><Minus /> Tiret cadratin</Button>
 
       <Popover>

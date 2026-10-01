@@ -52,7 +52,7 @@ export function LegalInformation({ compact = false }: { compact?: boolean }) {
         <SummaryCard
           icon={Cloud}
           title="Services à la demande"
-          description="Google Drive et le formulaire de feedback ne sont contactés qu’après une action volontaire."
+          description="Le formulaire de feedback n’est contacté qu’après une action volontaire."
         />
       </section>
 
@@ -141,17 +141,6 @@ export function LegalInformation({ compact = false }: { compact?: boolean }) {
               </a>
             </LegalCard>
 
-            <LegalCard title="Sauvegarde Google Drive">
-              <p>
-                Si vous activez Google Drive, le navigateur communique directement avec Google. Le Studio demande l’autorisation <code>drive.file</code>, limitée aux fichiers créés ou choisis avec l’application. Le jeton d’accès reste en mémoire pendant la session.
-              </p>
-              <p>
-                Le fichier de sauvegarde et sa durée de conservation dépendent alors de votre compte Google. Les identifiants techniques configurés pour Drive peuvent être conservés dans les paramètres locaux et dans vos sauvegardes.
-              </p>
-              <a className={`${linkClass} mt-3 text-xs`} href="https://policies.google.com/privacy?hl=fr" target="_blank" rel="noreferrer">
-                Règles de confidentialité de Google <ExternalLink className="size-3" />
-              </a>
-            </LegalCard>
           </div>
 
           <LegalCard title="Hébergement, cookies et traceurs">
@@ -199,7 +188,7 @@ export function LegalInformation({ compact = false }: { compact?: boolean }) {
                 La copie automatique du navigateur est une aide à la récupération, pas une sauvegarde garantie. Les données locales peuvent disparaître après un nettoyage du navigateur, un changement d’appareil ou une panne.
               </p>
               <p>
-                Il vous appartient de télécharger régulièrement un fichier <code>.efs</code> ou <code>.zip</code> et d’en conserver des copies. Les services GitHub, Google Drive et FormSubmit restent soumis à leurs propres disponibilités et conditions.
+                Il vous appartient de télécharger régulièrement un fichier <code>.efs</code> ou <code>.zip</code> et d’en conserver des copies. Les services GitHub et FormSubmit restent soumis à leurs propres disponibilités et conditions.
               </p>
             </LegalCard>
           </div>

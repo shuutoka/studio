@@ -585,9 +585,52 @@ textarea {
 }
 
 .superdoc-writing-shell .superdoc-page {
+  position: relative !important;
   margin-inline: auto !important;
   background: var(--efs-paper-background, #ffffff) !important;
   box-shadow: 0 10px 32px rgba(0, 0, 0, 0.22);
+}
+
+.superdoc-writing-shell[data-drawing-active="true"] .efs-drawing-layer {
+  cursor: crosshair;
+}
+
+.superdoc-writing-shell[data-comments-visible="false"] .superdoc-comment-highlight {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+@media (max-width: 1199px) {
+  .efs-comments-layer .efs-comment-cards {
+    inset: 6rem 0.5rem 0.5rem auto;
+    width: min(19rem, calc(100% - 1rem));
+    overflow-y: auto;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.85rem;
+    background: rgba(19, 18, 24, 0.94);
+    padding: 0.5rem;
+    pointer-events: auto;
+    backdrop-filter: blur(14px);
+  }
+
+  .efs-comments-layer .efs-comment-card {
+    position: relative !important;
+    top: auto !important;
+    right: auto !important;
+    width: 100% !important;
+    margin-bottom: 0.5rem;
+  }
+
+  .efs-comments-layer .efs-comment-composer {
+    top: 6rem !important;
+    right: 0.5rem !important;
+    width: min(19rem, calc(100% - 1rem)) !important;
+  }
+
+  .efs-comments-layer .efs-comments-toolbar {
+    right: 0.5rem !important;
+    width: min(19rem, calc(100% - 1rem)) !important;
+  }
 }
 
 .superdoc-writing-shell[data-paper-color-mode="dark"] .superdoc-page {

@@ -1,4 +1,4 @@
-const CACHE_NAME = "enfer-fatal-studio-writing-2-1-correctif-compteurs";
+const CACHE_NAME = "enfer-fatal-studio-review-tools-2026-10";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => {

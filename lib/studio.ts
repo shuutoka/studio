@@ -20,6 +20,14 @@ export type FooterFormat =
   | "date-iso";
 export type ShortcutPressMode = "single" | "double";
 export type WritingCounterKey = "words" | "paragraphs" | "pages" | "characters" | "symbols";
+export type WritingDrawingPoint = { x: number; y: number };
+export type WritingDrawingStroke = {
+  id: string;
+  pageIndex: number;
+  color: string;
+  size: number;
+  points: WritingDrawingPoint[];
+};
 export type BoardType = "tree" | "relationship";
 export type BoardTheme = "dark" | "light";
 export type BoardNodeKind = "text" | "image" | "character" | "group";
@@ -93,6 +101,7 @@ export type StudioVolume = {
   id: string;
   title: string;
   status: PageStatus;
+  pageFormat: PageFormat;
   footerType: FooterType;
   footerText: string;
   footerFormat: FooterFormat;
@@ -107,6 +116,8 @@ export type StudioVolume = {
   documentHtml: string;
   documentPageCount: number;
   documentOutline: Array<{ level: number; label: string }>;
+  /** Local review marks painted over the laid-out DOCX pages. */
+  documentDrawings: WritingDrawingStroke[];
 };
 
 export type CharacterRelation = {
@@ -240,16 +251,12 @@ export type StudioShortcuts = {
 };
 
 export type StudioSettings = {
-  schemaVersion: 7;
+  schemaVersion: 8;
   id: "studio-settings";
   revision: number;
   savedRevision: number;
   backupExtension: BackupExtension;
   backupFilename: string;
-  googleDriveClientId: string;
-  googleDriveApiKey: string;
-  googleDriveAppId: string;
-  googleDriveFileId: string;
   theme: AppTheme;
   writingTheme: WritingEditorTheme;
   zoom: number;
@@ -269,7 +276,7 @@ export type StudioSettings = {
 };
 
 export type StudioProject = {
-  schemaVersion: 8;
+  schemaVersion: 9;
   id: string;
   name: string;
   description: string;
@@ -319,16 +326,12 @@ export function createId(prefix: string) {
 
 export function createDefaultSettings(): StudioSettings {
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     id: "studio-settings",
     revision: 1,
     savedRevision: 1,
     backupExtension: "efs",
     backupFilename: "enfer-fatal-studio",
-    googleDriveClientId: "",
-    googleDriveApiKey: "",
-    googleDriveAppId: "",
-    googleDriveFileId: "",
     theme: "normal",
     writingTheme: "follow",
     zoom: 100,
@@ -382,10 +385,6 @@ export function normalizeSettings(value: unknown): StudioSettings {
       typeof input.backupFilename === "string" && input.backupFilename.trim()
         ? input.backupFilename.trim()
         : defaults.backupFilename,
-    googleDriveClientId: typeof input.googleDriveClientId === "string" ? input.googleDriveClientId.trim() : "",
-    googleDriveApiKey: typeof input.googleDriveApiKey === "string" ? input.googleDriveApiKey.trim() : "",
-    googleDriveAppId: typeof input.googleDriveAppId === "string" ? input.googleDriveAppId.trim() : "",
-    googleDriveFileId: typeof input.googleDriveFileId === "string" ? input.googleDriveFileId.trim() : "",
     theme: ["normal", "dark", "light"].includes(input.theme ?? "")
       ? input.theme as AppTheme
       : defaults.theme,
@@ -520,11 +519,12 @@ export function getVolumePages(volume: StudioVolume) {
   return volume.chapters.flatMap((chapter) => chapter.pages);
 }
 
-export function createEmptyVolume(index = 1, title = `Volume ${index}`): StudioVolume {
+export function createEmptyVolume(index = 1, title = `Volume ${index}`, pageFormat: PageFormat = "a4"): StudioVolume {
   return {
     id: createId("volume"),
     title,
     status: "draft",
+    pageFormat: pageFormat === "free" ? "a4" : pageFormat,
     footerType: "none",
     footerText: "",
     footerFormat: "page-of-total",
@@ -534,6 +534,7 @@ export function createEmptyVolume(index = 1, title = `Volume ${index}`): StudioV
     documentHtml: "",
     documentPageCount: 1,
     documentOutline: [],
+    documentDrawings: [],
   };
 }
 
@@ -626,12 +627,12 @@ export function getProjectStats(project: StudioProject): ProjectStats {
 export function createBlankProject(name: string, projectType: ProjectType = "manga"): StudioProject {
   const now = new Date().toISOString();
   return {
-    schemaVersion: 8, id: createId("project"), name: name.trim() || "Projet sans titre",
+    schemaVersion: 9, id: createId("project"), name: name.trim() || "Projet sans titre",
     description: "", cardColor: "#4d1824", bannerMediaId: null, status: "idea", projectType,
     defaultPageFormat: projectType === "novel" ? "novel" : projectType === "free" ? "free" : "a4",
     targetPages: 0, footerType: "none", footerText: "",
     createdAt: now, updatedAt: now, revision: 1, savedRevision: 0,
-    volumes: [createEmptyVolume()],
+    volumes: [createEmptyVolume(1, "Volume 1", projectType === "novel" ? "novel" : "a4")],
     characters: [], notes: [], goals: [], boardFolders: [], boards: [], customFonts: [],
   };
 }
@@ -806,7 +807,7 @@ export function normalizeProject(value: unknown): StudioProject {
     .flatMap((chapter) => chapter.pages ?? [])
     .find((page) => page.footerType && page.footerType !== "none");
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     id: input.id,
     name: input.name,
     description: typeof input.description === "string" ? input.description : "",
@@ -828,6 +829,7 @@ export function normalizeProject(value: unknown): StudioProject {
       id: typeof volume.id === "string" ? volume.id : createId("volume"),
       title: typeof volume.title === "string" ? volume.title : `Volume ${volumeIndex + 1}`,
       status: ["draft", "review", "done"].includes(volume.status ?? "") ? volume.status as PageStatus : "draft",
+      pageFormat: normalizePageFormat(volume.pageFormat, input.defaultPageFormat),
       footerType: ["none", "page", "date", "custom"].includes(volume.footerType ?? "")
         ? volume.footerType as FooterType
         : ["none", "page", "date", "custom"].includes(input.footerType ?? "")
@@ -854,6 +856,7 @@ export function normalizeProject(value: unknown): StudioProject {
             return [{ level: Math.min(6, Math.max(1, Number(entry.level) || 1)), label: entry.label.trim() }];
           })
         : [],
+      documentDrawings: normalizeWritingDrawings(volume.documentDrawings),
     })) : [],
     characters: Array.isArray(input.characters) ? input.characters.map(normalizeCharacter) : [],
     notes: Array.isArray(input.notes) ? input.notes.map((note) => ({
@@ -888,6 +891,41 @@ function normalizeFooterFormat(value: unknown): FooterFormat {
     "page-of-total", "number-of-total", "page-only", "number-only",
     "date-long", "date-short", "date-iso",
   ].includes(String(value)) ? value as FooterFormat : "page-of-total";
+}
+
+function normalizePageFormat(value: unknown, fallback: unknown): PageFormat {
+  const candidate = ["a4", "a5", "pocket", "novel", "large"].includes(String(value))
+    ? value
+    : fallback;
+  return ["a4", "a5", "pocket", "novel", "large"].includes(String(candidate))
+    ? candidate as PageFormat
+    : "a4";
+}
+
+function normalizeWritingDrawings(value: unknown): WritingDrawingStroke[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 5_000).flatMap((stroke) => {
+    if (!stroke || typeof stroke !== "object") return [];
+    const input = stroke as Partial<WritingDrawingStroke>;
+    const points = Array.isArray(input.points)
+      ? input.points.slice(0, 10_000).flatMap((point) => {
+          if (!point || typeof point !== "object") return [];
+          const x = Number((point as WritingDrawingPoint).x);
+          const y = Number((point as WritingDrawingPoint).y);
+          return Number.isFinite(x) && Number.isFinite(y)
+            ? [{ x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) }]
+            : [];
+        })
+      : [];
+    if (!points.length) return [];
+    return [{
+      id: typeof input.id === "string" && input.id ? input.id : createId("drawing"),
+      pageIndex: Number.isFinite(input.pageIndex) ? Math.max(0, Math.trunc(Number(input.pageIndex))) : 0,
+      color: normalizeColor(input.color, "#ef4f5f"),
+      size: Number.isFinite(input.size) ? Math.min(24, Math.max(1, Number(input.size))) : 4,
+      points,
+    } satisfies WritingDrawingStroke];
+  });
 }
 
 export const normalizeImportedProject = normalizeProject;

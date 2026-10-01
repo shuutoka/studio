@@ -1,16 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, LoaderCircle, Save } from "lucide-react";
+import { Check, CheckCircle2, LoaderCircle, MessageSquarePlus, Pencil, RotateCcw, Save, Trash2, X } from "lucide-react";
 import { SuperDocEditor, type SuperDocRef } from "@superdoc/react";
-import type { SelectionTarget } from "superdoc/ui";
+import type { CommentInfo, SelectionCapture, SelectionTarget } from "superdoc/ui";
 import "@superdoc/react/style.css";
 
 import { isSingleKeyShortcut, matchesShortcut } from "@/lib/shortcuts";
-import { applyDocxFooter, extractDocxOutline, extractDocxText } from "@/lib/writing-docx";
+import { applyDocxFooter, applyDocxPageFormat, extractDocxOutline, extractDocxText } from "@/lib/writing-docx";
 import { registerActiveWritingDocument } from "@/lib/writing-editor-registry";
 import { persistWritingDocument } from "@/lib/writing-document";
-import { STANDARD_FONTS, type StudioSettings, type StudioVolume } from "@/lib/studio";
+import { createId, STANDARD_FONTS, type StudioSettings, type StudioVolume, type WritingDrawingStroke } from "@/lib/studio";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { toast } from "sonner";
 
 export type WritingDocumentSnapshot = {
   text: string;
@@ -41,7 +44,7 @@ const STUDIO_SUPERDOC_UI = {
   comments: false,
 } as const;
 
-const STUDIO_SUPERDOC_MODULES = { comments: false } as const;
+const STUDIO_SUPERDOC_MODULES = { comments: { readOnly: false, allowResolve: true } } as const;
 const doublePressDelay = 450;
 
 type InsertTextPayload = {
@@ -69,6 +72,9 @@ export function SuperDocWritingEditor({
   navigationTarget,
   onSnapshot,
   onError,
+  commentsVisible,
+  drawingTool,
+  onAddDrawing,
 }: {
   projectId: string;
   volume: StudioVolume;
@@ -77,6 +83,9 @@ export function SuperDocWritingEditor({
   navigationTarget?: { text: string; token: number } | null;
   onSnapshot: (snapshot: WritingDocumentSnapshot) => void;
   onError: (message: string) => void;
+  commentsVisible: boolean;
+  drawingTool: { enabled: boolean; color: string; size: number };
+  onAddDrawing: (stroke: WritingDrawingStroke) => void;
 }) {
   const editorRef = useRef<SuperDocRef>(null);
   const shellRef = useRef<HTMLDivElement>(null);
@@ -101,6 +110,12 @@ export function SuperDocWritingEditor({
   const [ready, setReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [superdocInstance, setSuperdocInstance] = useState<SuperDocInstance | null>(null);
+  const [shellElement, setShellElement] = useState<HTMLDivElement | null>(null);
+  const assignShellRef = useCallback((node: HTMLDivElement | null) => {
+    shellRef.current = node;
+    setShellElement(node);
+  }, []);
 
   const fontOptions = useMemo(() => [
     ...STANDARD_FONTS
@@ -250,6 +265,15 @@ export function SuperDocWritingEditor({
         await persistWritingDocument(projectId, volume.id, volume.title, updated);
         window.setTimeout(() => void capture(), 120);
       },
+      applyPageFormat: async (format) => {
+        const instance = editorRef.current?.getInstance();
+        if (!instance) throw new Error("L’éditeur n’est pas prêt.");
+        const blob = await instance.export({ exportType: ["docx"], triggerDownload: false });
+        const updated = await applyDocxPageFormat(blob, format);
+        await Promise.resolve(instance.ui.document.replaceFile(updated));
+        await persistWritingDocument(projectId, volume.id, volume.title, updated);
+        window.setTimeout(() => void capture(), 160);
+      },
     });
   }, [capture, printEditor, projectId, ready, volume.id, volume.title]);
 
@@ -259,6 +283,27 @@ export function SuperDocWritingEditor({
     instance?.focus();
     instance?.ui.search.find(navigationTarget.text, { caseSensitive: false });
   }, [navigationTarget, ready]);
+
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!ready || !shell) return;
+    const detach: Array<() => void> = [];
+
+    const attachLayers = () => {
+      getRenderedSuperDocPages(shell).forEach((page, pageIndex) => {
+        if (page.querySelector(":scope > .efs-drawing-layer")) return;
+        detach.push(attachDrawingLayer(page, pageIndex, volume.documentDrawings, drawingTool, onAddDrawing));
+      });
+    };
+
+    attachLayers();
+    const observer = new MutationObserver(attachLayers);
+    observer.observe(shell, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      detach.forEach((cleanup) => cleanup());
+    };
+  }, [drawingTool, onAddDrawing, ready, volume.documentDrawings]);
 
   function configureCommands(superdoc: SuperDocInstance) {
     commandCleanupRef.current.forEach((cleanup) => cleanup());
@@ -436,9 +481,11 @@ export function SuperDocWritingEditor({
 
   return (
     <div
-      ref={shellRef}
+      ref={assignShellRef}
       className="superdoc-writing-shell relative flex w-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden"
       data-paper-color-mode={settings.paperColorMode}
+      data-comments-visible={commentsVisible ? "true" : "false"}
+      data-drawing-active={drawingTool.enabled ? "true" : "false"}
       style={{
         "--efs-paper-background": settings.paperBackground,
         "--sd-layout-page-color": settings.paperColorMode === "dark" ? "#eeeaf2" : "#29262b",
@@ -456,6 +503,7 @@ export function SuperDocWritingEditor({
         document={documentBlob}
         documentMode="editing"
         role="editor"
+        user={{ id: "studio-local-author", name: "Auteur du Studio" }}
         contained
         measurementUnit="cm"
         zoom={{ initial: 90, mode: "manual" }}
@@ -466,6 +514,7 @@ export function SuperDocWritingEditor({
         renderLoading={() => <div className="grid h-full min-h-72 place-items-center text-sm text-[#8f8996]"><span className="flex items-center gap-2"><LoaderCircle className="size-4 animate-spin" /> Préparation des pages…</span></div>}
         onReady={({ superdoc }) => {
           configureCommands(superdoc);
+          setSuperdocInstance(superdoc);
           setReady(true);
           // Fixed zoom plus toolbar overflow avoids the continuous resize loop.
           superdoc.ui.zoom.set(90);
@@ -479,8 +528,227 @@ export function SuperDocWritingEditor({
           console.error("SuperDoc", error);
         }}
       />
+      {commentsVisible && superdocInstance && <WritingCommentsLayer
+        superdoc={superdocInstance}
+        shell={shellElement}
+        onMutation={scheduleCapture}
+      />}
     </div>
   );
+}
+
+function WritingCommentsLayer({
+  superdoc,
+  shell,
+  onMutation,
+}: {
+  superdoc: SuperDocInstance;
+  shell: HTMLElement | null;
+  onMutation: () => void;
+}) {
+  const [comments, setComments] = useState<readonly CommentInfo[]>([]);
+  const [geometryRevision, setGeometryRevision] = useState(0);
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [composerText, setComposerText] = useState("");
+  const [composerAnchor, setComposerAnchor] = useState<SelectionCapture | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState("");
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const refreshComments = useCallback(() => {
+    setComments(superdoc.ui.comments.list({ includeResolved: true })
+      .filter((comment) => !comment.parentCommentId));
+  }, [superdoc]);
+
+  useEffect(() => superdoc.ui.comments.observe(refreshComments), [refreshComments, superdoc]);
+  useEffect(() => {
+    const stopViewport = superdoc.ui.viewport.observe(() => setGeometryRevision((value) => value + 1));
+    if (!shell) return stopViewport;
+    const observer = new ResizeObserver(() => setGeometryRevision((value) => value + 1));
+    observer.observe(shell);
+    return () => { stopViewport(); observer.disconnect(); };
+  }, [shell, superdoc]);
+
+  const positions = useMemo(() => {
+    void geometryRevision;
+    const anchored = comments.map((comment) => {
+      const result = shell ? superdoc.ui.viewport.getRect({ target: comment.address, relativeTo: shell }) : null;
+      const anchorTop = result?.found ? result.rects[0]?.top ?? result.rect?.top : null;
+      return { comment, anchorTop };
+    }).toSorted((left, right) => (left.anchorTop ?? Number.POSITIVE_INFINITY) - (right.anchorTop ?? Number.POSITIVE_INFINITY));
+    return anchored.reduce<{ nextTop: number; items: Array<{ comment: CommentInfo; top: number }> }>((state, entry) => {
+      const top = Math.max(state.nextTop, entry.anchorTop == null ? state.nextTop : entry.anchorTop - 12);
+      return { nextTop: top + 142, items: [...state.items, { comment: entry.comment, top }] };
+    }, { nextTop: 108, items: [] }).items;
+  }, [comments, geometryRevision, shell, superdoc]);
+
+  function beginComment() {
+    const capture = superdoc.ui.selection.capture();
+    if (!capture || capture.empty) {
+      toast.error("Sélectionnez d’abord le passage à commenter.");
+      return;
+    }
+    setComposerAnchor(capture);
+    setComposerText("");
+    setComposerOpen(true);
+  }
+
+  async function createComment() {
+    if (!composerAnchor || !composerText.trim()) return;
+    setBusyId("new");
+    const receipt = await Promise.resolve(superdoc.ui.comments.createFromCapture(composerAnchor, { text: composerText.trim() }));
+    setBusyId(null);
+    if (!receipt.success) {
+      toast.error(receipt.failure.message || "Le commentaire n’a pas pu être ajouté.");
+      return;
+    }
+    setComposerOpen(false);
+    setComposerAnchor(null);
+    setComposerText("");
+    refreshComments();
+    onMutation();
+  }
+
+  async function mutateComment(commentId: string, action: "edit" | "resolve" | "reopen" | "delete") {
+    if (action === "delete" && !window.confirm("Supprimer définitivement ce commentaire ?")) return;
+    setBusyId(commentId);
+    const receipt = action === "edit"
+      ? await Promise.resolve(superdoc.ui.comments.edit(commentId, { text: editingText.trim() }))
+      : action === "resolve"
+        ? await Promise.resolve(superdoc.ui.comments.resolve(commentId))
+        : action === "reopen"
+          ? await Promise.resolve(superdoc.ui.comments.reopen(commentId))
+          : await Promise.resolve(superdoc.ui.comments.delete(commentId));
+    setBusyId(null);
+    if (!receipt.success) {
+      toast.error(receipt.failure.message || "Le commentaire n’a pas pu être modifié.");
+      return;
+    }
+    setEditingId(null);
+    setEditingText("");
+    refreshComments();
+    onMutation();
+  }
+
+  return (
+    <div className="efs-comments-layer absolute inset-0 z-[24] pointer-events-none" aria-label="Commentaires du manuscrit">
+      <div className="efs-comments-toolbar pointer-events-auto absolute right-3 top-13 flex w-72 items-center justify-between rounded-xl border border-white/10 bg-[#17151d]/96 p-2 shadow-xl backdrop-blur">
+        <span className="px-1 text-xs font-semibold text-[#d8d3dd]">{comments.length} commentaire{comments.length > 1 ? "s" : ""}</span>
+        <Button size="sm" className="h-8 bg-[#ef4f5f] text-xs text-white" onPointerDown={(event) => { event.preventDefault(); beginComment(); }}><MessageSquarePlus /> Ajouter</Button>
+      </div>
+
+      {composerOpen && <section className="efs-comment-composer pointer-events-auto absolute right-3 top-24 z-10 w-72 rounded-xl border border-[#ef4f5f]/35 bg-[#1b1821] p-3 shadow-2xl">
+        <div className="mb-2 flex items-center justify-between"><strong className="text-xs text-white">Nouveau commentaire</strong><Button size="icon-xs" variant="ghost" aria-label="Fermer" onClick={() => setComposerOpen(false)}><X /></Button></div>
+        <Textarea autoFocus value={composerText} placeholder="Votre remarque…" className="min-h-24 border-white/10 bg-black/20 text-sm" onChange={(event) => setComposerText(event.target.value)} />
+        <div className="mt-2 flex justify-end gap-2"><Button size="sm" variant="ghost" onClick={() => setComposerOpen(false)}>Annuler</Button><Button size="sm" disabled={!composerText.trim() || busyId === "new"} onClick={() => void createComment()}>{busyId === "new" && <LoaderCircle className="animate-spin" />} Ajouter</Button></div>
+      </section>}
+
+      <div className="efs-comment-cards absolute inset-0">
+        {positions.map(({ comment, top }) => {
+          const commentId = comment.id;
+          const resolved = comment.status === "resolved";
+          const editing = editingId === commentId;
+          return <article
+            key={commentId}
+            className={`efs-comment-card pointer-events-auto absolute right-3 w-72 rounded-xl border p-3 shadow-xl backdrop-blur ${resolved ? "border-white/7 bg-[#17151d]/78 text-[#77717f]" : "border-[#ef4f5f]/20 bg-[#17151d]/96 text-[#d8d3dd]"}`}
+            style={{ top }}
+          >
+            <button type="button" className="mb-2 block w-full text-left" onClick={() => { superdoc.ui.comments.setActive(commentId); void superdoc.ui.comments.scrollTo(commentId); }}>
+              <span className="flex items-center justify-between gap-2 text-[11px]"><strong className={resolved ? "text-[#8f8996]" : "text-[#ff8a95]"}>{comment.creatorName || "Auteur"}</strong>{resolved && <span className="flex items-center gap-1"><CheckCircle2 className="size-3" /> Validé</span>}</span>
+              {comment.anchoredText && <span className="mt-1 block truncate text-[10px] italic text-[#77717f]">« {comment.anchoredText} »</span>}
+            </button>
+            {editing ? <><Textarea autoFocus value={editingText} className="min-h-20 border-white/10 bg-black/20 text-xs" onChange={(event) => setEditingText(event.target.value)} /><div className="mt-2 flex justify-end gap-1"><Button size="icon-xs" variant="ghost" aria-label="Annuler la modification" onClick={() => setEditingId(null)}><X /></Button><Button size="icon-xs" aria-label="Enregistrer le commentaire" disabled={!editingText.trim() || busyId === commentId} onClick={() => void mutateComment(commentId, "edit")}><Check /></Button></div></> : <p className={`whitespace-pre-wrap text-xs leading-5 ${resolved ? "line-through decoration-white/15" : ""}`}>{comment.text || "Commentaire sans texte"}</p>}
+            {!editing && <div className="mt-2 flex justify-end gap-1 border-t border-white/6 pt-2">
+              <Button size="icon-xs" variant="ghost" title="Modifier" aria-label="Modifier" disabled={busyId === commentId} onClick={() => { setEditingId(commentId); setEditingText(comment.text ?? ""); }}><Pencil /></Button>
+              <Button size="icon-xs" variant="ghost" title={resolved ? "Rouvrir" : "Valider"} aria-label={resolved ? "Rouvrir" : "Valider"} disabled={busyId === commentId} onClick={() => void mutateComment(commentId, resolved ? "reopen" : "resolve")}>{resolved ? <RotateCcw /> : <CheckCircle2 />}</Button>
+              <Button size="icon-xs" variant="ghost" className="text-[#c87882]" title="Supprimer" aria-label="Supprimer" disabled={busyId === commentId} onClick={() => void mutateComment(commentId, "delete")}><Trash2 /></Button>
+            </div>}
+          </article>;
+        })}
+      </div>
+    </div>
+  );
+}
+
+function attachDrawingLayer(
+  page: HTMLElement,
+  pageIndex: number,
+  drawings: WritingDrawingStroke[],
+  tool: { enabled: boolean; color: string; size: number },
+  onAddDrawing: (stroke: WritingDrawingStroke) => void,
+) {
+  const namespace = "http://www.w3.org/2000/svg";
+  const layer = document.createElementNS(namespace, "svg");
+  layer.classList.add("efs-drawing-layer");
+  layer.setAttribute("viewBox", "0 0 1000 1000");
+  layer.setAttribute("preserveAspectRatio", "none");
+  layer.setAttribute("aria-hidden", "true");
+  Object.assign(layer.style, {
+    position: "absolute", inset: "0", width: "100%", height: "100%", zIndex: "16",
+    pointerEvents: tool.enabled ? "auto" : "none", touchAction: tool.enabled ? "none" : "auto",
+  });
+
+  for (const stroke of drawings.filter((item) => item.pageIndex === pageIndex)) {
+    layer.append(createDrawingPath(namespace, stroke.points, stroke.color, stroke.size));
+  }
+
+  let active: { pointerId: number; points: Array<{ x: number; y: number }>; path: SVGPathElement } | null = null;
+  const pointFromEvent = (event: PointerEvent) => {
+    const rect = layer.getBoundingClientRect();
+    return {
+      x: Math.min(1, Math.max(0, (event.clientX - rect.left) / Math.max(1, rect.width))),
+      y: Math.min(1, Math.max(0, (event.clientY - rect.top) / Math.max(1, rect.height))),
+    };
+  };
+  const pointerDown = (event: PointerEvent) => {
+    if (!tool.enabled || (event.pointerType === "mouse" && event.button !== 0)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const points = [pointFromEvent(event)];
+    const path = createDrawingPath(namespace, points, tool.color, tool.size);
+    layer.append(path);
+    active = { pointerId: event.pointerId, points, path };
+    layer.setPointerCapture(event.pointerId);
+  };
+  const pointerMove = (event: PointerEvent) => {
+    if (!active || active.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    const point = pointFromEvent(event);
+    const previous = active.points.at(-1)!;
+    if (Math.hypot(point.x - previous.x, point.y - previous.y) < 0.0015) return;
+    active.points.push(point);
+    active.path.setAttribute("d", drawingPathData(active.points));
+  };
+  const finishStroke = (event: PointerEvent) => {
+    if (!active || active.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    if (active.points.length === 1) active.points.push({ x: Math.min(1, active.points[0].x + 0.001), y: active.points[0].y });
+    onAddDrawing({ id: createId("drawing"), pageIndex, color: tool.color, size: tool.size, points: active.points });
+    active = null;
+  };
+  layer.addEventListener("pointerdown", pointerDown);
+  layer.addEventListener("pointermove", pointerMove);
+  layer.addEventListener("pointerup", finishStroke);
+  layer.addEventListener("pointercancel", finishStroke);
+  page.style.position = "relative";
+  page.append(layer);
+  return () => layer.remove();
+}
+
+function createDrawingPath(namespace: string, points: Array<{ x: number; y: number }>, color: string, size: number) {
+  const path = document.createElementNS(namespace, "path") as SVGPathElement;
+  path.setAttribute("d", drawingPathData(points));
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke", color);
+  path.setAttribute("stroke-width", String(size));
+  path.setAttribute("stroke-linecap", "round");
+  path.setAttribute("stroke-linejoin", "round");
+  path.setAttribute("vector-effect", "non-scaling-stroke");
+  return path;
+}
+
+function drawingPathData(points: Array<{ x: number; y: number }>) {
+  return points.map((point, index) => `${index ? "L" : "M"}${Math.round(point.x * 1000)} ${Math.round(point.y * 1000)}`).join(" ");
 }
 
 function advanceSelectionTarget(target: SelectionTarget | null, text: string): SelectionTarget | null {
