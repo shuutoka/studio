@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   LoaderCircle, MessageSquareText, Minus, Moon, PanelBottom, PencilLine,
-  Sigma, Sun, Trash2, Undo2,
+  Sigma, SlidersHorizontal, Sun, Trash2, Undo2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -179,12 +179,19 @@ export function WritingDocumentControls({
         onClick={onToggleComments}
       ><MessageSquareText /> Commentaires</Button>
 
+      <Button
+        size="sm"
+        variant={drawingEnabled ? "default" : "ghost"}
+        className={drawingEnabled ? "shrink-0 bg-[#ef4f5f] text-xs text-white" : "shrink-0 text-xs"}
+        aria-pressed={drawingEnabled}
+        onClick={() => onDrawingEnabledChange(!drawingEnabled)}
+      ><PencilLine /> {drawingEnabled ? "Dessin actif" : "Dessiner"}</Button>
+
       <Popover>
-        <PopoverTrigger asChild><Button size="sm" variant={drawingEnabled ? "default" : "ghost"} className={drawingEnabled ? "shrink-0 bg-[#ef4f5f] text-xs text-white" : "shrink-0 text-xs"}><PencilLine /> Dessin libre</Button></PopoverTrigger>
+        <PopoverTrigger asChild><Button size="sm" variant="ghost" className="shrink-0 text-xs" aria-label="Options du dessin"><SlidersHorizontal /> Options</Button></PopoverTrigger>
         <PopoverContent align="start" className="w-80 border-white/10 bg-[#1b1821] text-[#eeeaf2]">
-          <PopoverHeader className="mb-4"><PopoverTitle>Annotation au crayon</PopoverTitle></PopoverHeader>
+          <PopoverHeader className="mb-4"><PopoverTitle>Options du dessin</PopoverTitle></PopoverHeader>
           <div className="grid gap-4">
-            <Button variant={drawingEnabled ? "default" : "outline"} className={drawingEnabled ? "bg-[#ef4f5f] text-white" : "border-white/10 bg-transparent"} onClick={() => onDrawingEnabledChange(!drawingEnabled)}><PencilLine /> {drawingEnabled ? "Quitter le mode dessin" : "Commencer à dessiner"}</Button>
             <div><p className="mb-2 text-xs text-[#aaa4b4]">Couleur</p><div className="flex flex-wrap gap-2">{["#ef4f5f", "#ffb020", "#f3e55a", "#58c68a", "#5aa9ff", "#b783ff", "#29262b"].map((color) => <button key={color} type="button" aria-label={`Couleur ${color}`} aria-pressed={drawingColor === color} className="size-8 rounded-full border border-white/20 outline-none transition hover:scale-105 focus-visible:ring-2 focus-visible:ring-[#ef4f5f] aria-pressed:ring-2 aria-pressed:ring-white" style={{ backgroundColor: color }} onClick={() => onDrawingColorChange(color)} />)}</div></div>
             <div><p className="mb-2 text-xs text-[#aaa4b4]">Épaisseur</p><div className="grid grid-cols-4 gap-2">{[{ value: 2, label: "Fine" }, { value: 4, label: "Normale" }, { value: 8, label: "Large" }, { value: 14, label: "Très large" }].map((item) => <button key={item.value} type="button" aria-pressed={drawingSize === item.value} className="grid h-10 place-items-center rounded-md border border-white/9 bg-white/3 text-[10px] text-[#aaa4b4] hover:bg-white/7 aria-pressed:border-[#ef4f5f]/60 aria-pressed:bg-[#ef4f5f]/10 aria-pressed:text-white" onClick={() => onDrawingSizeChange(item.value)}><span className="rounded-full bg-current" style={{ width: Math.max(4, item.value), height: Math.max(4, item.value) }} /><span className="sr-only">{item.label}</span></button>)}</div></div>
             <div className="flex gap-2"><Button variant="outline" className="flex-1 border-white/10 bg-transparent" disabled={!volume.documentDrawings.length} onClick={onUndoDrawing}><Undo2 /> Annuler un trait</Button><Button variant="ghost" className="text-[#d27a84]" disabled={!volume.documentDrawings.length} onClick={() => { if (window.confirm("Effacer toutes les annotations dessinées de ce volume ?")) onClearDrawings(); }}><Trash2 /> Tout effacer</Button></div>

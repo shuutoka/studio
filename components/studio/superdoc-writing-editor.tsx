@@ -7,7 +7,7 @@ import type { CommentInfo, SelectionCapture, SelectionTarget } from "superdoc/ui
 import "@superdoc/react/style.css";
 
 import { isSingleKeyShortcut, matchesShortcut } from "@/lib/shortcuts";
-import { exportDocxWithDrawings } from "@/lib/writing-drawing-export";
+import { exportDocxWithDrawings, type RenderedDrawingAnchor } from "@/lib/writing-drawing-export";
 import { applyDocxFooter, applyDocxPageFormat, extractDocxOutline, extractDocxText } from "@/lib/writing-docx";
 import { registerActiveWritingDocument } from "@/lib/writing-editor-registry";
 import { persistWritingDocument } from "@/lib/writing-document";
@@ -244,7 +244,9 @@ export function SuperDocWritingEditor({
         const instance = editorRef.current?.getInstance();
         if (!instance) throw new Error("L’éditeur n’est pas prêt.");
         const blob = await instance.export({ exportType: ["docx"], triggerDownload: false });
-        const pageAnchors = shellRef.current ? getRenderedPageAnchors(shellRef.current) : new Map<number, string>();
+        const pageAnchors = shellRef.current
+          ? getRenderedPageAnchors(shellRef.current)
+          : new Map<number, RenderedDrawingAnchor>();
         return exportDocxWithDrawings(blob, volume.documentDrawings, volume.pageFormat, pageAnchors);
       },
       getText: () => {
@@ -299,7 +301,7 @@ export function SuperDocWritingEditor({
         detach.push(attachDrawingLayer(
           page,
           pageIndex,
-          pageAnchors.get(pageIndex) ?? "",
+          pageAnchors.get(pageIndex) ?? {},
           volume.documentDrawings,
           drawingTool,
           onAddDrawing,
@@ -331,6 +333,42 @@ export function SuperDocWritingEditor({
       shell.removeEventListener("dragstart", preventEditorSelection, true);
     };
   }, [drawingTool.enabled, ready]);
+
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!ready || !shell) return;
+    let lastMarginPress = 0;
+    const blurEditor = () => {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && shell.contains(active)) active.blur();
+    };
+    const keepMobileMarginsPassive = (event: Event) => {
+      if (shell.getBoundingClientRect().width > 767) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const editorSurface = shell.querySelector(".superdoc-editor-container");
+      if (!editorSurface?.contains(target) || target.closest(".superdoc-page")) return;
+      if (target.closest("button, input, textarea, select, [role='button'], .efs-comments-layer")) return;
+      lastMarginPress = Date.now();
+      if (event.type === "click") event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      window.setTimeout(blurEditor, 0);
+    };
+    const undoMarginFocus = (event: FocusEvent) => {
+      if (Date.now() - lastMarginPress > 600) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && target.isContentEditable) window.setTimeout(blurEditor, 0);
+    };
+    shell.addEventListener("pointerdown", keepMobileMarginsPassive, true);
+    shell.addEventListener("click", keepMobileMarginsPassive, true);
+    shell.addEventListener("focusin", undoMarginFocus, true);
+    return () => {
+      shell.removeEventListener("pointerdown", keepMobileMarginsPassive, true);
+      shell.removeEventListener("click", keepMobileMarginsPassive, true);
+      shell.removeEventListener("focusin", undoMarginFocus, true);
+    };
+  }, [ready]);
 
   useEffect(() => {
     const shell = shellRef.current;
@@ -740,7 +778,7 @@ function WritingCommentsLayer({
 function attachDrawingLayer(
   page: HTMLElement,
   pageIndex: number,
-  anchorBlockId: string,
+  anchor: RenderedDrawingAnchor,
   drawings: WritingDrawingStroke[],
   tool: { enabled: boolean; color: string; size: number },
   onAddDrawing: (stroke: WritingDrawingStroke) => void,
@@ -798,7 +836,8 @@ function attachDrawingLayer(
     onAddDrawing({
       id: createId("drawing"),
       pageIndex,
-      anchorBlockId: anchorBlockId || undefined,
+      anchorBlockId: anchor.blockId || undefined,
+      anchorParagraphIndex: anchor.paragraphIndex,
       color: tool.color,
       size: tool.size,
       points: active.points,
@@ -817,7 +856,12 @@ function attachDrawingLayer(
 
 function getPageBlockIds(page: HTMLElement) {
   const preferred = [...page.querySelectorAll<HTMLElement>("[data-layout-story='body'][data-layout-block-ref]")];
-  const candidates = preferred.length
+  const paragraphFragments = preferred.filter((item) =>
+    item.classList.contains("superdoc-fragment") && Boolean(item.querySelector(".superdoc-line")),
+  );
+  const candidates = paragraphFragments.length
+    ? paragraphFragments
+    : preferred.length
     ? preferred
     : [...page.querySelectorAll<HTMLElement>("[data-layout-block-ref]")];
   return [...new Set(candidates.map((item) => item.getAttribute("data-layout-block-ref") ?? "").filter(Boolean))];
@@ -825,11 +869,15 @@ function getPageBlockIds(page: HTMLElement) {
 
 function getRenderedPageAnchors(shell: HTMLElement) {
   const seen = new Set<string>();
-  const anchors = new Map<number, string>();
+  const paragraphIndices = new Map<string, number>();
+  const anchors = new Map<number, RenderedDrawingAnchor>();
   getRenderedSuperDocPages(shell).forEach((page, pageIndex) => {
     const blockIds = getPageBlockIds(page);
+    blockIds.forEach((blockId) => {
+      if (!paragraphIndices.has(blockId)) paragraphIndices.set(blockId, paragraphIndices.size);
+    });
     const anchor = blockIds.find((blockId) => !seen.has(blockId)) ?? blockIds[0];
-    if (anchor) anchors.set(pageIndex, anchor);
+    if (anchor) anchors.set(pageIndex, { blockId: anchor, paragraphIndex: paragraphIndices.get(anchor) });
     blockIds.forEach((blockId) => seen.add(blockId));
   });
   return anchors;

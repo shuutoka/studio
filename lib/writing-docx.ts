@@ -18,7 +18,8 @@ const RETIRED_QUICK_FORMAT_STYLES = new Set(["chapter", "chapitre"]);
 export type DocxOutlineEntry = { level: number; label: string };
 export type DocxDrawingOverlay = {
   pageIndex: number;
-  anchorBlockId: string;
+  anchorBlockId?: string;
+  anchorParagraphIndex?: number;
   pngBytes: Uint8Array;
   widthPx: number;
   heightPx: number;
@@ -210,15 +211,21 @@ export async function applyDocxDrawingOverlays(blob: Blob, overlays: DocxDrawing
   const usedRelationshipIds = new Set(
     directChildren(relationships.documentElement, "Relationship").map((item) => item.getAttribute("Id") ?? ""),
   );
-  const paragraphs = elementsByLocalName(documentXml, "p");
+  const body = elementsByLocalName(documentXml, "body")[0];
+  if (!body) throw new Error("La structure du document DOCX est invalide.");
+  const paragraphs = elementsByLocalName(body, "p").filter((paragraph) => !hasAncestorLocalName(paragraph, "txbxContent"));
+  if (!paragraphs.length) {
+    const paragraph = documentXml.createElementNS(WORD_NS, "w:p");
+    const section = directChild(body, "sectPr");
+    body.insertBefore(paragraph, section ?? null);
+    paragraphs.push(paragraph);
+  }
+  const pageParagraphs = inferPageParagraphs(paragraphs);
   const usedMediaPaths = new Set(Object.keys(archive));
   let drawingId = Math.max(0, ...elementsByLocalName(documentXml, "docPr").map((item) => Number(attribute(item, "id")) || 0));
-  let embedded = 0;
 
   for (const overlay of overlays) {
-    const normalizedAnchor = overlay.anchorBlockId.toLocaleLowerCase("en");
-    const paragraph = paragraphs.find((item) => attribute(item, "paraId").toLocaleLowerCase("en") === normalizedAnchor);
-    if (!paragraph) continue;
+    const paragraph = findDrawingAnchorParagraph(paragraphs, pageParagraphs, overlay);
 
     let mediaIndex = overlay.pageIndex + 1;
     let mediaPath = `word/media/efs-drawing-page-${mediaIndex}.png`;
@@ -239,7 +246,7 @@ export async function applyDocxDrawingOverlays(blob: Blob, overlays: DocxDrawing
     drawingId += 1;
     const widthEmu = Math.max(1, Math.round(overlay.widthPx * 9_525));
     const heightEmu = Math.max(1, Math.round(overlay.heightPx * 9_525));
-    paragraph.append(createAnchoredDrawingRun(documentXml, {
+    insertDrawingAtParagraphStart(paragraph, createAnchoredDrawingRun(documentXml, {
       relationshipId,
       drawingId,
       name: `Annotations manuscrites — page ${overlay.pageIndex + 1}`,
@@ -247,11 +254,6 @@ export async function applyDocxDrawingOverlays(blob: Blob, overlays: DocxDrawing
       heightEmu,
     }));
     archive[mediaPath] = overlay.pngBytes;
-    embedded += 1;
-  }
-
-  if (!embedded) {
-    throw new Error("Les dessins n’ont pas pu être reliés aux pages du DOCX. Ouvrez le volume dans l’espace Écriture puis relancez l’export.");
   }
 
   const contentTypes = ensureContentTypes(archive);
@@ -268,6 +270,69 @@ export async function applyDocxDrawingOverlays(blob: Blob, overlays: DocxDrawing
   archive["word/_rels/document.xml.rels"] = strToU8(serializeXml(relationships));
   archive["[Content_Types].xml"] = strToU8(serializeXml(contentTypes));
   return docxBlob(zipSync(archive, { level: 6 }));
+}
+
+function findDrawingAnchorParagraph(
+  paragraphs: Element[],
+  pageParagraphs: ReadonlyMap<number, Element>,
+  overlay: DocxDrawingOverlay,
+) {
+  const requestedId = normalizeDrawingAnchorId(overlay.anchorBlockId ?? "");
+  if (requestedId) {
+    const exact = paragraphs.find((paragraph) => {
+      const paragraphId = normalizeDrawingAnchorId(attribute(paragraph, "paraId"));
+      if (!paragraphId) return false;
+      return paragraphId === requestedId
+        || (paragraphId.length >= 8 && requestedId.length >= 8 && paragraphId.slice(-8) === requestedId.slice(-8));
+    });
+    if (exact) return exact;
+  }
+  if (Number.isFinite(overlay.anchorParagraphIndex)) {
+    const byOrder = paragraphs[Math.max(0, Math.trunc(overlay.anchorParagraphIndex!))];
+    if (byOrder) return byOrder;
+  }
+  return pageParagraphs.get(overlay.pageIndex)
+    ?? paragraphs[Math.min(overlay.pageIndex, paragraphs.length - 1)]
+    ?? paragraphs[0];
+}
+
+function normalizeDrawingAnchorId(value: string) {
+  return value.trim().toLocaleLowerCase("en").replace(/[^a-z0-9]/gu, "");
+}
+
+function inferPageParagraphs(paragraphs: Element[]) {
+  const result = new Map<number, Element>();
+  let pageIndex = 0;
+  let pendingBreaks = 0;
+  paragraphs.forEach((paragraph, paragraphIndex) => {
+    if (paragraphIndex > 0 && pendingBreaks) {
+      pageIndex += pendingBreaks;
+      pendingBreaks = 0;
+    }
+    const properties = directChild(paragraph, "pPr");
+    if (paragraphIndex > 0 && directChild(properties, "pageBreakBefore")) pageIndex += 1;
+    if (!result.has(pageIndex)) result.set(pageIndex, paragraph);
+    pendingBreaks += elementsByLocalName(paragraph, "br")
+      .filter((item) => attribute(item, "type") === "page").length;
+    pendingBreaks += elementsByLocalName(paragraph, "lastRenderedPageBreak").length;
+    const sectionType = attribute(directChild(directChild(properties, "sectPr"), "type"), "val");
+    if (directChild(properties, "sectPr") && sectionType !== "continuous") pendingBreaks += 1;
+  });
+  return result;
+}
+
+function insertDrawingAtParagraphStart(paragraph: Element, run: Node) {
+  const properties = directChild(paragraph, "pPr");
+  paragraph.insertBefore(run, properties ? properties.nextSibling : paragraph.firstChild);
+}
+
+function hasAncestorLocalName(element: Element, name: string) {
+  let parent = element.parentElement;
+  while (parent) {
+    if (parent.localName === name) return true;
+    parent = parent.parentElement;
+  }
+  return false;
 }
 
 function createAnchoredDrawingRun(

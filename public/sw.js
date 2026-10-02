@@ -1,4 +1,4 @@
-const CACHE_NAME = "enfer-fatal-studio-mobile-drawing-docx-2026-10";
+const CACHE_NAME = "enfer-fatal-studio-drawing-export-fix-2026-10";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => {

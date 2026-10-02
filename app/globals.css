@@ -671,6 +671,10 @@ textarea {
   .superdoc-writing-shell .superdoc__layers {
     overflow-x: hidden !important;
     overscroll-behavior: contain;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: pan-y;
+    -webkit-tap-highlight-color: transparent;
   }
 
   .writing-workspace .superdoc-writing-shell :is(
@@ -697,6 +701,14 @@ textarea {
   .superdoc-writing-shell .superdoc-page {
     flex: none !important;
     max-width: none !important;
+    user-select: text;
+    -webkit-user-select: text;
+    touch-action: pan-y;
+  }
+
+  .superdoc-writing-shell[data-drawing-active="true"] .superdoc-page {
+    user-select: none !important;
+    -webkit-user-select: none !important;
   }
 
   .superdoc-writing-shell .superdoc-writing-status {
