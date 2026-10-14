@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  LoaderCircle, MessageSquareText, Minus, Moon, PanelBottom, PencilLine,
-  Sigma, Sun, Trash2, Undo2,
+  Languages, LoaderCircle, MessageSquareText, Minus, Moon, PanelBottom, PencilLine,
+  Sigma, SlidersHorizontal, Sun, Trash2, Undo2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -15,7 +15,7 @@ import { DATE_FOOTER_FORMATS, footerFormatForType, formatFooterText, PAGE_FOOTER
 import {
   PAGE_FORMATS,
   type FooterFormat, type FooterType, type PageFormat, type PageStatus,
-  type StudioSettings, type StudioVolume,
+  type StudioSettings, type StudioVolume, type WritingLanguage, WRITING_LANGUAGES,
 } from "@/lib/studio";
 
 const specialCharacterGroups = {
@@ -43,6 +43,7 @@ export function WritingDocumentControls({
   onPaperModeChange,
   onInsert,
   onApplyFooter,
+  onApplyLanguage,
   commentsVisible,
   onToggleComments,
   drawingEnabled,
@@ -61,6 +62,7 @@ export function WritingDocumentControls({
   onPaperModeChange: (mode: "light" | "dark") => void;
   onInsert: (text: string) => boolean;
   onApplyFooter: (type: FooterType, text: string, format: FooterFormat) => Promise<void>;
+  onApplyLanguage: (language: WritingLanguage, scope: "document" | "selection") => Promise<void>;
   commentsVisible: boolean;
   onToggleComments: () => void;
   drawingEnabled: boolean;
@@ -80,6 +82,8 @@ export function WritingDocumentControls({
   const [applyingFooter, setApplyingFooter] = useState(false);
   const [characterQuery, setCharacterQuery] = useState("");
   const [applyingPageFormat, setApplyingPageFormat] = useState(false);
+  const [language, setLanguage] = useState<WritingLanguage>(volume.documentLanguage);
+  const [applyingLanguage, setApplyingLanguage] = useState<"document" | "selection" | null>(null);
 
   useEffect(() => {
     // The local draft is intentionally reset when another volume is opened.
@@ -87,7 +91,8 @@ export function WritingDocumentControls({
     setFooterType(volume.footerType);
     setFooterText(volume.footerText);
     setFooterFormat(footerFormatForType(volume.footerType, volume.footerFormat));
-  }, [volume.footerFormat, volume.footerText, volume.footerType, volume.id]);
+    setLanguage(volume.documentLanguage);
+  }, [volume.documentLanguage, volume.footerFormat, volume.footerText, volume.footerType, volume.id]);
 
   const filteredCharacters = useMemo(() => Object.entries(specialCharacterGroups)
     .map(([group, characters]) => ({
@@ -124,6 +129,20 @@ export function WritingDocumentControls({
     }
   }
 
+  async function applyLanguage(scope: "document" | "selection") {
+    setApplyingLanguage(scope);
+    try {
+      await onApplyLanguage(language, scope);
+      toast.success(scope === "document"
+        ? "Langue appliquée à tout le volume."
+        : "Langue appliquée au passage sélectionné.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "La langue n’a pas pu être appliquée.");
+    } finally {
+      setApplyingLanguage(null);
+    }
+  }
+
   return (
     <div className="writing-document-controls flex min-h-10 items-center gap-2 overflow-x-auto border-t border-white/6 px-3 py-1.5 sm:px-5">
       <Select value={volume.status} onValueChange={(value: PageStatus) => onStatusChange(value)}>
@@ -142,6 +161,26 @@ export function WritingDocumentControls({
         <Button aria-label="Feuille claire" title="Feuille claire" aria-pressed={settings.paperColorMode === "light"} size="icon-xs" variant={settings.paperColorMode === "light" ? "default" : "ghost"} className={settings.paperColorMode === "light" ? "bg-[#ef4f5f] text-white" : ""} onClick={() => onPaperModeChange("light")}><Sun /></Button>
         <Button aria-label="Feuille sombre" title="Feuille sombre" aria-pressed={settings.paperColorMode === "dark"} size="icon-xs" variant={settings.paperColorMode === "dark" ? "default" : "ghost"} className={settings.paperColorMode === "dark" ? "bg-[#ef4f5f] text-white" : ""} onClick={() => onPaperModeChange("dark")}><Moon /></Button>
       </div>
+
+      <Popover>
+        <PopoverTrigger asChild><Button size="sm" variant="outline" className="shrink-0 border-white/10 bg-transparent text-xs"><Languages /> Langue</Button></PopoverTrigger>
+        <PopoverContent align="start" className="w-80 border-white/10 bg-[#1b1821] text-[#eeeaf2]">
+          <PopoverHeader className="mb-4"><PopoverTitle>Correction orthographique</PopoverTitle></PopoverHeader>
+          <div className="grid gap-3">
+            <label className="grid gap-1.5 text-xs text-[#aaa4b4]">Langue
+              <Select value={language} onValueChange={(value: WritingLanguage) => setLanguage(value)}>
+                <SelectTrigger className="w-full border-white/10 bg-black/20"><SelectValue /></SelectTrigger>
+                <SelectContent>{WRITING_LANGUAGES.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent>
+              </Select>
+            </label>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Button disabled={Boolean(applyingLanguage)} onClick={() => void applyLanguage("document")}>{applyingLanguage === "document" ? <LoaderCircle className="animate-spin" /> : <Languages />} Tout le volume</Button>
+              <Button variant="outline" className="border-white/10 bg-transparent" disabled={Boolean(applyingLanguage)} onClick={() => void applyLanguage("selection")}>{applyingLanguage === "selection" ? <LoaderCircle className="animate-spin" /> : <Languages />} Sélection</Button>
+            </div>
+            <p className="text-[11px] leading-4 text-[#77717f]">La correction orthographique et les suggestions fonctionnent localement. La correction grammaticale complète n’est pas disponible hors ligne dans cette version.</p>
+          </div>
+        </PopoverContent>
+      </Popover>
 
       <Popover>
         <PopoverTrigger asChild><Button size="sm" variant="outline" className="shrink-0 border-white/10 bg-transparent text-xs"><PanelBottom /> Pied de page</Button></PopoverTrigger>
@@ -179,12 +218,19 @@ export function WritingDocumentControls({
         onClick={onToggleComments}
       ><MessageSquareText /> Commentaires</Button>
 
+      <Button
+        size="sm"
+        variant={drawingEnabled ? "default" : "ghost"}
+        className={drawingEnabled ? "shrink-0 bg-[#ef4f5f] text-xs text-white" : "shrink-0 text-xs"}
+        aria-pressed={drawingEnabled}
+        onClick={() => onDrawingEnabledChange(!drawingEnabled)}
+      ><PencilLine /> {drawingEnabled ? "Dessin actif" : "Dessiner"}</Button>
+
       <Popover>
-        <PopoverTrigger asChild><Button size="sm" variant={drawingEnabled ? "default" : "ghost"} className={drawingEnabled ? "shrink-0 bg-[#ef4f5f] text-xs text-white" : "shrink-0 text-xs"}><PencilLine /> Dessin libre</Button></PopoverTrigger>
+        <PopoverTrigger asChild><Button size="sm" variant="ghost" className="shrink-0 text-xs" aria-label="Options du dessin"><SlidersHorizontal /> Options</Button></PopoverTrigger>
         <PopoverContent align="start" className="w-80 border-white/10 bg-[#1b1821] text-[#eeeaf2]">
-          <PopoverHeader className="mb-4"><PopoverTitle>Annotation au crayon</PopoverTitle></PopoverHeader>
+          <PopoverHeader className="mb-4"><PopoverTitle>Options du dessin</PopoverTitle></PopoverHeader>
           <div className="grid gap-4">
-            <Button variant={drawingEnabled ? "default" : "outline"} className={drawingEnabled ? "bg-[#ef4f5f] text-white" : "border-white/10 bg-transparent"} onClick={() => onDrawingEnabledChange(!drawingEnabled)}><PencilLine /> {drawingEnabled ? "Quitter le mode dessin" : "Commencer à dessiner"}</Button>
             <div><p className="mb-2 text-xs text-[#aaa4b4]">Couleur</p><div className="flex flex-wrap gap-2">{["#ef4f5f", "#ffb020", "#f3e55a", "#58c68a", "#5aa9ff", "#b783ff", "#29262b"].map((color) => <button key={color} type="button" aria-label={`Couleur ${color}`} aria-pressed={drawingColor === color} className="size-8 rounded-full border border-white/20 outline-none transition hover:scale-105 focus-visible:ring-2 focus-visible:ring-[#ef4f5f] aria-pressed:ring-2 aria-pressed:ring-white" style={{ backgroundColor: color }} onClick={() => onDrawingColorChange(color)} />)}</div></div>
             <div><p className="mb-2 text-xs text-[#aaa4b4]">Épaisseur</p><div className="grid grid-cols-4 gap-2">{[{ value: 2, label: "Fine" }, { value: 4, label: "Normale" }, { value: 8, label: "Large" }, { value: 14, label: "Très large" }].map((item) => <button key={item.value} type="button" aria-pressed={drawingSize === item.value} className="grid h-10 place-items-center rounded-md border border-white/9 bg-white/3 text-[10px] text-[#aaa4b4] hover:bg-white/7 aria-pressed:border-[#ef4f5f]/60 aria-pressed:bg-[#ef4f5f]/10 aria-pressed:text-white" onClick={() => onDrawingSizeChange(item.value)}><span className="rounded-full bg-current" style={{ width: Math.max(4, item.value), height: Math.max(4, item.value) }} /><span className="sr-only">{item.label}</span></button>)}</div></div>
             <div className="flex gap-2"><Button variant="outline" className="flex-1 border-white/10 bg-transparent" disabled={!volume.documentDrawings.length} onClick={onUndoDrawing}><Undo2 /> Annuler un trait</Button><Button variant="ghost" className="text-[#d27a84]" disabled={!volume.documentDrawings.length} onClick={() => { if (window.confirm("Effacer toutes les annotations dessinées de ce volume ?")) onClearDrawings(); }}><Trash2 /> Tout effacer</Button></div>

@@ -18,11 +18,13 @@ import {
   FileText,
   FolderOpen,
   Home,
+  ImagePlus,
   Import,
   LayoutDashboard,
   Library,
   Network,
   NotebookPen,
+  Pencil,
   Plus,
   Save,
   Settings2,
@@ -736,6 +738,7 @@ export function ProjectWorkspace({
   updateSettings,
   focusMode = false,
   onToggleFocus = () => undefined,
+  onOpenSettings = () => undefined,
 }: {
   project: StudioProject;
   section: Section;
@@ -754,30 +757,81 @@ export function ProjectWorkspace({
   updateSettings?: (mutate: (draft: StudioSettings) => void) => void;
   focusMode?: boolean;
   onToggleFocus?: () => void;
+  onOpenSettings?: () => void;
 }) {
   const effectiveSettings = settings ?? createDefaultSettings();
   const effectiveUpdateSettings = updateSettings ?? (() => undefined);
-  if (section === "writing") return <WritingWorkspace project={project} selectedPageId={selectedPageId} onSelectPage={onSelectPage} updateProject={updateProject} settings={effectiveSettings} updateSettings={effectiveUpdateSettings} focusMode={focusMode} onToggleFocus={onToggleFocus} />;
+  if (section === "writing") return <WritingWorkspace project={project} selectedPageId={selectedPageId} onSelectPage={onSelectPage} updateProject={updateProject} settings={effectiveSettings} updateSettings={effectiveUpdateSettings} focusMode={focusMode} onToggleFocus={onToggleFocus} onOpenSettings={onOpenSettings} />;
   if (section === "characters") return <CharacterManager project={project} selectedCharacterId={selectedCharacterId} onSelectCharacter={onSelectCharacter} updateProject={updateProject} uploadMedia={uploadMedia} removeMedia={removeMedia} />;
   if (section === "boards") return <BoardsWorkspace project={project} updateProject={updateProject} uploadMedia={uploadMedia} onOpenCharacter={onOpenCharacter ?? onSelectCharacter} />;
   if (section === "notes") return <NotesView project={project} selectedNoteId={selectedNoteId} onSelectNote={onSelectNote} updateProject={updateProject} />;
-  return <DashboardView project={project} updateProject={updateProject} onDeleteProject={onDeleteProject} />;
+  return <DashboardView project={project} updateProject={updateProject} uploadMedia={uploadMedia} removeMedia={removeMedia} onDeleteProject={onDeleteProject} />;
 }
 
 function DashboardView({
   project,
   updateProject,
+  uploadMedia,
+  removeMedia,
   onDeleteProject,
 }: {
   project: StudioProject;
   updateProject: (mutate: (draft: StudioProject) => void) => void;
+  uploadMedia: (files: File[], kind: StudioMedia["kind"]) => Promise<string[]>;
+  removeMedia: (mediaId: string) => Promise<void>;
   onDeleteProject: () => void;
 }) {
   const stats = getProjectStats(project);
+  const [editOpen, setEditOpen] = useState(false);
+  const [nameDraft, setNameDraft] = useState(project.name);
+  const [bannerFile, setBannerFile] = useState<File | null>(null);
+  const [removeBanner, setRemoveBanner] = useState(false);
+  const [savingIdentity, setSavingIdentity] = useState(false);
+
+  function openIdentityEditor() {
+    setNameDraft(project.name);
+    setBannerFile(null);
+    setRemoveBanner(false);
+    setEditOpen(true);
+  }
+
+  async function saveIdentity() {
+    const name = nameDraft.trim();
+    if (!name) return;
+    setSavingIdentity(true);
+    try {
+      let bannerMediaId = removeBanner ? null : project.bannerMediaId;
+      if (bannerFile) {
+        const uploaded = await uploadMedia([bannerFile], "project-banner");
+        if (!uploaded[0]) throw new Error("La bannière n’a pas pu être enregistrée.");
+        bannerMediaId = uploaded[0];
+      }
+      const previousBanner = project.bannerMediaId;
+      updateProject((draft) => {
+        draft.name = name;
+        draft.bannerMediaId = bannerMediaId;
+      });
+      if (previousBanner && previousBanner !== bannerMediaId) await removeMedia(previousBanner).catch(() => undefined);
+      setEditOpen(false);
+      toast.success("Informations du projet mises à jour.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Le projet n’a pas pu être modifié.");
+    } finally {
+      setSavingIdentity(false);
+    }
+  }
+
   return (
     <div className="studio-page flex-1 overflow-y-auto px-5 py-8 sm:px-8 lg:px-12 lg:py-10">
       <div className="mx-auto max-w-6xl">
-        <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><div className="mb-2 text-xs font-semibold uppercase tracking-[.18em] text-[#ef6977]">Vue d’ensemble</div><h1 className="text-3xl font-bold tracking-[-.03em] text-white">{project.name}</h1><p className="mt-2 text-sm text-[#8f8996]">Dernière modification {formatDate(project.updatedAt)}</p></div><WritingExportButton project={project} /></div>
+        <section className="relative mb-8 min-h-48 overflow-hidden rounded-3xl border border-white/10" style={{ backgroundColor: project.cardColor }}>
+          {project.bannerMediaId && <MediaPreview mediaId={project.bannerMediaId} alt={`Bannière de ${project.name}`} className="absolute inset-0 size-full" />}
+          <div className="absolute inset-0 bg-gradient-to-r from-[#0c0b0f]/95 via-[#0c0b0f]/68 to-[#0c0b0f]/30" />
+          <div className="relative flex min-h-48 flex-col justify-end gap-5 p-6 sm:flex-row sm:items-end sm:justify-between sm:p-8">
+            <div className="min-w-0"><div className="mb-2 text-xs font-semibold uppercase tracking-[.18em] text-[#ff8a95]">Vue d’ensemble</div><h1 className="truncate text-3xl font-bold tracking-[-.03em] text-white sm:text-4xl">{project.name}</h1><p className="mt-2 text-sm text-white/65">Dernière modification {formatDate(project.updatedAt)}</p></div>
+            <div className="flex shrink-0 flex-wrap gap-2"><Button variant="outline" className="border-white/15 bg-black/25 text-white hover:bg-black/45" onClick={openIdentityEditor}><Pencil /> Modifier</Button><WritingExportButton project={project} /></div>
+          </div>
+        </section>
         <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Metric label="Progression" value={`${stats.progress}%`} icon={BarChart3} />
           <Metric label="Pages" value={`${stats.completedPages} / ${project.targetPages || stats.pages}`} icon={FileText} />
@@ -813,6 +867,18 @@ function DashboardView({
           <Button variant="destructive" onClick={onDeleteProject}><Trash2 /> Supprimer le projet</Button>
         </section>
       </div>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="border-white/10 bg-[#17151d] text-[#eeeaf2]">
+          <DialogHeader><DialogTitle>Modifier le projet</DialogTitle><DialogDescription className="text-[#9c96a5]">Changez le nom affiché et la bannière du tableau de bord.</DialogDescription></DialogHeader>
+          <div className="grid gap-4">
+            <label className="grid gap-2 text-xs font-medium text-[#aaa4b4]">Nom du projet<Input autoFocus value={nameDraft} className="border-white/10 bg-black/20" onChange={(event) => setNameDraft(event.target.value)} /></label>
+            <label className="grid gap-2 text-xs font-medium text-[#aaa4b4]">Nouvelle bannière<span className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-white/12 bg-black/15 px-4 text-center hover:border-[#ef4f5f]/45"><ImagePlus className="mb-2 size-5 text-[#ef6977]" /><span className="text-sm text-[#c8c2cf]">{bannerFile?.name ?? (project.bannerMediaId ? "Remplacer la bannière" : "Choisir une image")}</span><input type="file" accept="image/*" className="hidden" onChange={(event) => { setBannerFile(event.target.files?.[0] ?? null); setRemoveBanner(false); }} /></span></label>
+            {project.bannerMediaId && <Button variant="ghost" className={removeBanner ? "text-[#ff8a95]" : "text-[#aaa4b4]"} onClick={() => { setRemoveBanner((current) => !current); setBannerFile(null); }}><Trash2 /> {removeBanner ? "La bannière sera retirée" : "Retirer la bannière actuelle"}</Button>}
+          </div>
+          <DialogFooter><Button variant="ghost" onClick={() => setEditOpen(false)}>Annuler</Button><Button className="bg-[#ef4f5f] text-white" disabled={!nameDraft.trim() || savingIdentity} onClick={() => void saveIdentity()}>{savingIdentity ? "Enregistrement…" : "Enregistrer"}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

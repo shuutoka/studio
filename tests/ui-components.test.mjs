@@ -204,7 +204,7 @@ test("creates and migrates persistent story boards", async () => {
   project.boards[0].folderId = "folder-timeline";
 
   const normalized = normalizeProject(project);
-  assert.equal(normalized.schemaVersion, 10);
+  assert.equal(normalized.schemaVersion, 12);
   assert.equal(normalized.boards[0].name, "Ligne temporelle");
   assert.equal(normalized.boards[0].nodes.length, 2);
   assert.equal(normalized.boards[0].edges[0].label, "Puis");
@@ -287,7 +287,7 @@ test("renders the legal notice and requires feedback privacy consent", async () 
   assert.match(app, /globalView === "legal"/);
   assert.match(settingsView, /privacyAccepted/);
   assert.match(settingsView, /J’accepte que les informations saisies/);
-  assert.match(serviceWorker, /enfer-fatal-studio-mobile-drawing-docx/);
+  assert.match(serviceWorker, /enfer-fatal-studio-proofing-dashboard-mobile/);
 });
 
 test("ships the native SuperDoc writing workspace and embeds documents in EFS backups", async () => {
@@ -304,7 +304,7 @@ test("ships the native SuperDoc writing workspace and embeds documents in EFS ba
   assert.match(superdocEditor, /"ai"/);
   assert.match(superdocEditor, /persistWritingDocument/);
   assert.match(writingDocument, /writing-docx/);
-  assert.match(projectFile, /formatVersion:\s*10/);
+  assert.match(projectFile, /formatVersion:\s*12/);
 });
 
 test("keeps SuperDoc inside the Studio viewport without continuous fit-width feedback", async () => {
@@ -351,7 +351,8 @@ test("reconnects Writing 2.1 to Studio preferences and native DOCX metadata", as
   const project = normalizeProject({ ...createBlankProject("Migration 2.1", "novel"), schemaVersion: 7 });
   assert.equal(settings.schemaVersion, 8);
   assert.equal(settings.writingTheme, "follow");
-  assert.equal(project.schemaVersion, 10);
+  assert.equal(project.schemaVersion, 12);
+  assert.equal(project.volumes[0].documentLanguage, "fr-FR");
   assert.equal(project.volumes[0].status, "draft");
   assert.equal(project.volumes[0].footerFormat, "page-of-total");
   assert.deepEqual(project.volumes[0].documentOutline, []);
@@ -415,31 +416,74 @@ test("adds review drawings, anchored comments and per-volume paper formats witho
   const settings = await readFile(path.join(root, "components/studio/settings-view.tsx"), "utf8");
   const controls = await readFile(path.join(root, "components/studio/writing-document-controls.tsx"), "utf8");
   const editor = await readFile(path.join(root, "components/studio/superdoc-writing-editor.tsx"), "utf8");
+  const drawingExport = await readFile(path.join(root, "lib/writing-drawing-export.ts"), "utf8");
+  const css = await readFile(path.join(root, "app/globals.css"), "utf8");
   const workflow = await readFile(path.join(root, ".github/workflows/deploy-pages.yml"), "utf8");
 
   const project = createBlankProject("Relecture", "novel");
   project.volumes[0].pageFormat = "a5";
-  project.volumes[0].documentDrawings = [{ id: "trait-1", pageIndex: 0, anchorBlockId: "A1B2C3D4", color: "#ef4f5f", size: 4, points: [{ x: 0.1, y: 0.2 }, { x: 0.2, y: 0.3 }] }];
+  project.volumes[0].documentDrawings = [{ id: "trait-1", pageIndex: 0, anchorBlockId: "A1B2C3D4", anchorParagraphIndex: 0, color: "#ef4f5f", size: 4, points: [{ x: 0.1, y: 0.2 }, { x: 0.2, y: 0.3 }] }];
   const normalized = normalizeProject(project);
-  assert.equal(normalized.schemaVersion, 10);
+  assert.equal(normalized.schemaVersion, 12);
   assert.equal(normalized.volumes[0].pageFormat, "a5");
   assert.equal(normalized.volumes[0].documentDrawings.length, 1);
   assert.equal(normalized.volumes[0].documentDrawings[0].anchorBlockId, "A1B2C3D4");
+  assert.equal(normalized.volumes[0].documentDrawings[0].anchorParagraphIndex, 0);
 
   await assert.rejects(readFile(path.join(root, "lib/google-drive.ts"), "utf8"), { code: "ENOENT" });
   assert.doesNotMatch(app, /Google Drive|googleDrive/);
   assert.doesNotMatch(settings, /Google Drive|googleDrive/);
   assert.doesNotMatch(workflow, /GOOGLE_DRIVE/);
   assert.match(controls, /Format de la feuille/);
-  assert.match(controls, /Dessin libre/);
+  assert.match(controls, /Dessin actif/);
+  assert.match(controls, /Options du dessin/);
   assert.match(controls, /Commentaires/);
   assert.match(editor, /createFromCapture/);
   assert.match(editor, /comments:\s*\{ readOnly: false, allowResolve: true \}/);
   assert.match(editor, /efs-drawing-layer/);
   assert.match(editor, /documentDrawings/);
   assert.match(editor, /preventEditorSelection/);
+  assert.match(editor, /keepMobileMarginsPassive/);
   assert.match(editor, /getRenderedPageAnchors/);
   assert.match(editor, /exportDocxWithDrawings/);
+  assert.match(drawingExport, /anchorParagraphIndex/);
+  assert.doesNotMatch(drawingExport, /Ouvrez ce volume/);
+  assert.match(css, /touch-action: pan-y/);
+});
+
+test("adds local proofing, dashboard identity editing and mobile-safe drawing", async () => {
+  const { createBlankProject, normalizeProject, WRITING_LANGUAGES } = await vite.ssrLoadModule("/lib/studio.ts");
+  const project = createBlankProject("Langues", "novel");
+  delete project.volumes[0].documentLanguage;
+  const normalized = normalizeProject(project);
+  assert.equal(normalized.schemaVersion, 12);
+  assert.equal(normalized.volumes[0].documentLanguage, "fr-FR");
+  assert.equal(WRITING_LANGUAGES.length, 5);
+
+  const app = await readFile(path.join(root, "components/studio/studio-app-v3.tsx"), "utf8");
+  const dashboard = await readFile(path.join(root, "components/studio/studio-app.tsx"), "utf8");
+  const workspace = await readFile(path.join(root, "components/studio/writing-workspace.tsx"), "utf8");
+  const controls = await readFile(path.join(root, "components/studio/writing-document-controls.tsx"), "utf8");
+  const editor = await readFile(path.join(root, "components/studio/superdoc-writing-editor.tsx"), "utf8");
+  const proofing = await readFile(path.join(root, "lib/writing-proofing.ts"), "utf8");
+  const docx = await readFile(path.join(root, "lib/writing-docx.ts"), "utf8");
+  const css = await readFile(path.join(root, "app/globals.css"), "utf8");
+
+  assert.match(app, /settingsDialogOpen/);
+  assert.match(app, /Modifier les préférences sans quitter l’espace d’écriture/);
+  assert.match(dashboard, /Bannière de \$\{project\.name\}/);
+  assert.match(dashboard, /Modifier le projet/);
+  assert.match(workspace, /onOpenSettings/);
+  assert.match(controls, /Correction orthographique/);
+  assert.match(controls, /Tout le volume/);
+  assert.match(controls, /Sélection/);
+  assert.match(proofing, /enfer-fatal-local-spelling/);
+  assert.match(proofing, /requiresNetwork: false/);
+  assert.match(docx, /applyDocxLanguage/);
+  assert.match(editor, /attachDrawingShield/);
+  assert.match(editor, /virtualKeyboard/);
+  assert.match(css, /efs-drawing-shield/);
+  assert.match(css, /\[data-slot="select-content"\]/);
 });
 
 test("formats page numbers and dates for the native footer", async () => {
@@ -481,6 +525,32 @@ test("applies a selected paper format to every DOCX section", async () => {
   }
 });
 
+test("stores a document language in DOCX runs and defaults", async () => {
+  const { JSDOM } = await import("jsdom");
+  const { strFromU8, strToU8, unzipSync, zipSync } = await import("fflate");
+  const { applyDocxLanguage } = await vite.ssrLoadModule("/lib/writing-docx.ts");
+  const dom = new JSDOM();
+  const previousDOMParser = globalThis.DOMParser;
+  const previousXMLSerializer = globalThis.XMLSerializer;
+  globalThis.DOMParser = dom.window.DOMParser;
+  globalThis.XMLSerializer = dom.window.XMLSerializer;
+
+  try {
+    const xml = `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Hello</w:t></w:r></w:p><w:sectPr/></w:body></w:document>`;
+    const bytes = zipSync({ "word/document.xml": strToU8(xml) });
+    const updated = await applyDocxLanguage(new Blob([bytes]), "en-GB");
+    const archive = unzipSync(new Uint8Array(await updated.arrayBuffer()));
+    assert.match(strFromU8(archive["word/document.xml"]), /w:lang w:val="en-GB"/);
+    assert.match(strFromU8(archive["word/styles.xml"]), /w:lang w:val="en-GB"/);
+  } finally {
+    if (previousDOMParser) globalThis.DOMParser = previousDOMParser;
+    else delete globalThis.DOMParser;
+    if (previousXMLSerializer) globalThis.XMLSerializer = previousXMLSerializer;
+    else delete globalThis.XMLSerializer;
+    dom.window.close();
+  }
+});
+
 test("embeds a transparent drawing overlay on its anchored DOCX page", async () => {
   const { JSDOM } = await import("jsdom");
   const { strFromU8, strToU8, unzipSync, zipSync } = await import("fflate");
@@ -492,7 +562,7 @@ test("embeds a transparent drawing overlay on its anchored DOCX page", async () 
   globalThis.XMLSerializer = dom.window.XMLSerializer;
 
   try {
-    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"><w:body><w:p w14:paraId="A1B2C3D4"><w:r><w:t>Texte annoté</w:t></w:r></w:p><w:sectPr/></w:body></w:document>`;
+    const documentXml = `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"><w:body><w:p w14:paraId="A1B2C3D4"><w:r><w:t>Texte annoté</w:t></w:r></w:p><w:p><w:pPr><w:pageBreakBefore/></w:pPr><w:r><w:t>Deuxième page sans paraId stable</w:t></w:r></w:p><w:sectPr/></w:body></w:document>`;
     const relationships = `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>`;
     const contentTypes = `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/></Types>`;
     const source = zipSync({
@@ -500,22 +570,35 @@ test("embeds a transparent drawing overlay on its anchored DOCX page", async () 
       "word/_rels/document.xml.rels": strToU8(relationships),
       "[Content_Types].xml": strToU8(contentTypes),
     });
-    const updated = await applyDocxDrawingOverlays(new Blob([source]), [{
-      pageIndex: 0,
-      anchorBlockId: "A1B2C3D4",
-      pngBytes: new Uint8Array([137, 80, 78, 71]),
-      widthPx: 794,
-      heightPx: 1123,
-    }]);
+    const updated = await applyDocxDrawingOverlays(new Blob([source]), [
+      {
+        pageIndex: 0,
+        anchorBlockId: "A1B2C3D4",
+        pngBytes: new Uint8Array([137, 80, 78, 71]),
+        widthPx: 794,
+        heightPx: 1123,
+      },
+      {
+        pageIndex: 1,
+        anchorBlockId: "identifiant-regénéré-par-superdoc",
+        anchorParagraphIndex: 1,
+        pngBytes: new Uint8Array([137, 80, 78, 71, 2]),
+        widthPx: 794,
+        heightPx: 1123,
+      },
+    ]);
     const archive = unzipSync(new Uint8Array(await updated.arrayBuffer()));
     const resultDocument = strFromU8(archive["word/document.xml"]);
     const resultRelationships = strFromU8(archive["word/_rels/document.xml.rels"]);
     const resultContentTypes = strFromU8(archive["[Content_Types].xml"]);
 
     assert.ok(archive["word/media/efs-drawing-page-1.png"]);
+    assert.ok(archive["word/media/efs-drawing-page-2.png"]);
+    assert.equal(resultDocument.match(/<wp:anchor\b/gu)?.length, 2);
     assert.match(resultDocument, /wp:anchor/);
     assert.match(resultDocument, /relativeFrom="page"/);
     assert.match(resultDocument, /Annotations manuscrites — page 1/);
+    assert.match(resultDocument, /Annotations manuscrites — page 2/);
     assert.match(resultRelationships, /relationships\/image/);
     assert.match(resultRelationships, /media\/efs-drawing-page-1\.png/);
     assert.match(resultContentTypes, /Extension="png" ContentType="image\/png"/);

@@ -37,6 +37,7 @@ import {
   createEmptyPage, createEmptyVolume, createId, getVolumePages,
   getWritingDocumentStats, stripHtml, type StudioProject, type StudioSettings,
   type StudioVolume, type WritingCounterKey, type PageFormat, type WritingDrawingStroke,
+  type WritingLanguage,
 } from "@/lib/studio";
 import type { ImportedWritingDocument } from "@/lib/writing-import";
 
@@ -62,7 +63,7 @@ function volumeForPage(project: StudioProject, pageId: string | null) {
 
 export function WritingWorkspace({
   project, selectedPageId, onSelectPage, updateProject, settings, updateSettings,
-  focusMode, onToggleFocus,
+  focusMode, onToggleFocus, onOpenSettings,
 }: {
   project: StudioProject;
   selectedPageId: string | null;
@@ -72,6 +73,7 @@ export function WritingWorkspace({
   updateSettings: (mutate: (draft: StudioSettings) => void) => void;
   focusMode: boolean;
   onToggleFocus: () => void;
+  onOpenSettings: () => void;
 }) {
   const activeVolume = volumeForPage(project, selectedPageId) ?? project.volumes[0] ?? null;
   const [documentBlob, setDocumentBlob] = useState<Blob | null>(null);
@@ -249,6 +251,19 @@ export function WritingWorkspace({
     });
   }
 
+  async function applyVolumeLanguage(language: WritingLanguage, scope: "document" | "selection") {
+    if (!activeVolume) throw new Error("Aucun volume n’est ouvert.");
+    const activeDocument = getActiveWritingDocument(activeVolume.id);
+    if (!activeDocument) throw new Error("Attendez que le document soit complètement ouvert.");
+    await activeDocument.applyLanguage(language, scope);
+    if (scope === "document") {
+      updateProject((draft) => {
+        const volume = draft.volumes.find((candidate) => candidate.id === activeVolume.id);
+        if (volume) volume.documentLanguage = language;
+      });
+    }
+  }
+
   const activeVolumeId = activeVolume?.id ?? null;
 
   const addDrawing = useCallback((stroke: WritingDrawingStroke) => {
@@ -297,6 +312,7 @@ export function WritingWorkspace({
             <WritingImportButton onImport={importWriting} />
             <WritingExportButton project={project} initialVolumeId={activeVolume?.id} compact />
             <div className={focusMode ? "" : "lg:hidden"}><Popover><PopoverTrigger asChild><Button size="sm" variant="outline" className="border-white/10" aria-label="Afficher le plan"><ListTree /><span className="hidden sm:inline">Plan</span></Button></PopoverTrigger><PopoverContent align="end" className="max-h-[72svh] w-80 overflow-y-auto border-white/10 bg-[#17151d] p-2 text-[#eeeaf2]"><PopoverHeader className="px-2 py-2"><PopoverTitle>Plan du projet</PopoverTitle></PopoverHeader><OutlinePanel project={project} activeVolumeId={activeVolume?.id ?? null} outlines={outlines} collapsedVolumes={collapsedVolumes} setCollapsedVolumes={setCollapsedVolumes} onSelectVolume={selectVolume} onNavigate={navigateToHeading} /></PopoverContent></Popover></div>
+            <Button size="sm" variant="ghost" aria-label="Ouvrir les paramètres du Studio" onClick={onOpenSettings}><Settings2 /><span className="hidden md:inline">Paramètres</span></Button>
             <Button size="sm" variant="ghost" aria-label={focusMode ? "Quitter le mode focus" : "Activer le mode focus"} onClick={onToggleFocus}>{focusMode ? <Minimize2 /> : <Focus />}<span className="hidden sm:inline">{focusMode ? "Quitter" : "Focus"}</span></Button>
           </div>
         </div>
@@ -323,6 +339,7 @@ export function WritingWorkspace({
           })}
           onInsert={insertIntoDocument}
           onApplyFooter={applyVolumeFooter}
+          onApplyLanguage={applyVolumeLanguage}
           commentsVisible={commentsVisible}
           onToggleComments={() => setCommentsVisible((current) => !current)}
           drawingEnabled={drawingEnabled}

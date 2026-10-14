@@ -7,11 +7,15 @@ import type { CommentInfo, SelectionCapture, SelectionTarget } from "superdoc/ui
 import "@superdoc/react/style.css";
 
 import { isSingleKeyShortcut, matchesShortcut } from "@/lib/shortcuts";
-import { exportDocxWithDrawings } from "@/lib/writing-drawing-export";
-import { applyDocxFooter, applyDocxPageFormat, extractDocxOutline, extractDocxText } from "@/lib/writing-docx";
+import { exportDocxWithDrawings, type RenderedDrawingAnchor } from "@/lib/writing-drawing-export";
+import { applyDocxFooter, applyDocxLanguage, applyDocxPageFormat, extractDocxOutline, extractDocxText } from "@/lib/writing-docx";
 import { registerActiveWritingDocument } from "@/lib/writing-editor-registry";
 import { persistWritingDocument } from "@/lib/writing-document";
-import { createId, PAGE_FORMATS, STANDARD_FONTS, type StudioSettings, type StudioVolume, type WritingDrawingStroke } from "@/lib/studio";
+import { createStudioProofingProvider, preloadWritingDictionary } from "@/lib/writing-proofing";
+import {
+  createId, PAGE_FORMATS, STANDARD_FONTS, type StudioSettings, type StudioVolume,
+  type WritingDrawingStroke, type WritingLanguage,
+} from "@/lib/studio";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
@@ -129,6 +133,8 @@ export function SuperDocWritingEditor({
       .filter((font) => font.enabled)
       .map((font) => ({ value: font.family, label: font.name, previewFamily: font.family })),
   ], [settings.customFonts, settings.enabledStandardFonts, settings.systemFonts]);
+  const proofingProvider = useMemo(() => createStudioProofingProvider(), []);
+  const proofingErrorShownRef = useRef(false);
 
   const editorUi = useMemo(() => ({
     ...STUDIO_SUPERDOC_UI,
@@ -244,7 +250,9 @@ export function SuperDocWritingEditor({
         const instance = editorRef.current?.getInstance();
         if (!instance) throw new Error("L’éditeur n’est pas prêt.");
         const blob = await instance.export({ exportType: ["docx"], triggerDownload: false });
-        const pageAnchors = shellRef.current ? getRenderedPageAnchors(shellRef.current) : new Map<number, string>();
+        const pageAnchors = shellRef.current
+          ? getRenderedPageAnchors(shellRef.current)
+          : new Map<number, RenderedDrawingAnchor>();
         return exportDocxWithDrawings(blob, volume.documentDrawings, volume.pageFormat, pageAnchors);
       },
       getText: () => {
@@ -277,8 +285,40 @@ export function SuperDocWritingEditor({
         await persistWritingDocument(projectId, volume.id, volume.title, updated);
         window.setTimeout(() => void capture(), 160);
       },
+      applyLanguage: async (language: WritingLanguage, scope) => {
+        const instance = editorRef.current?.getInstance();
+        if (!instance) throw new Error("L’éditeur n’est pas prêt.");
+        if (scope === "selection") {
+          const target = instance.ui.selection.current()?.selectionTarget ?? lastSelectionTargetRef.current;
+          if (!target || selectionIsCollapsed(target)) {
+            throw new Error("Sélectionnez d’abord le passage auquel appliquer cette langue.");
+          }
+          const format = instance.activeEditor?.doc?.format;
+          if (!format) throw new Error("La mise en forme de la sélection n’est pas disponible.");
+          const receipt = await Promise.resolve(format.apply({ target, inline: { lang: { val: language } } }));
+          if (!receipt.success) throw new Error("La langue n’a pas pu être appliquée à la sélection.");
+          instance.ui.selection.apply(target);
+          instance.focus();
+          await capture();
+          return;
+        }
+        const blob = await instance.export({ exportType: ["docx"], triggerDownload: false });
+        const updated = await applyDocxLanguage(blob, language);
+        await Promise.resolve(instance.ui.document.replaceFile(updated));
+        await persistWritingDocument(projectId, volume.id, volume.title, updated);
+        window.setTimeout(() => void capture(), 160);
+      },
     });
   }, [capture, printEditor, projectId, ready, volume.documentDrawings, volume.id, volume.pageFormat, volume.title]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void preloadWritingDictionary(volume.documentLanguage).catch((error) => {
+      if (proofingErrorShownRef.current) return;
+      proofingErrorShownRef.current = true;
+      onError(error instanceof Error ? error.message : "Le dictionnaire orthographique n’a pas pu être chargé.");
+    });
+  }, [onError, ready, volume.documentLanguage]);
 
   useEffect(() => {
     if (!ready || !navigationTarget?.text) return;
@@ -293,17 +333,9 @@ export function SuperDocWritingEditor({
     const detach: Array<() => void> = [];
 
     const attachLayers = () => {
-      const pageAnchors = getRenderedPageAnchors(shell);
       getRenderedSuperDocPages(shell).forEach((page, pageIndex) => {
         if (page.querySelector(":scope > .efs-drawing-layer")) return;
-        detach.push(attachDrawingLayer(
-          page,
-          pageIndex,
-          pageAnchors.get(pageIndex) ?? "",
-          volume.documentDrawings,
-          drawingTool,
-          onAddDrawing,
-        ));
+        detach.push(attachDrawingLayer(page, pageIndex, volume.documentDrawings));
       });
     };
 
@@ -314,7 +346,17 @@ export function SuperDocWritingEditor({
       observer.disconnect();
       detach.forEach((cleanup) => cleanup());
     };
-  }, [drawingTool, onAddDrawing, ready, volume.documentDrawings]);
+  }, [ready, volume.documentDrawings]);
+
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!ready || !shell || !drawingTool.enabled) return;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && shell.contains(active)) active.blur();
+    const virtualKeyboard = navigator as Navigator & { virtualKeyboard?: { hide: () => void } };
+    virtualKeyboard.virtualKeyboard?.hide();
+    return attachDrawingShield(shell, drawingTool, onAddDrawing);
+  }, [drawingTool, onAddDrawing, ready]);
 
   useEffect(() => {
     const shell = shellRef.current;
@@ -331,6 +373,42 @@ export function SuperDocWritingEditor({
       shell.removeEventListener("dragstart", preventEditorSelection, true);
     };
   }, [drawingTool.enabled, ready]);
+
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!ready || !shell) return;
+    let lastMarginPress = 0;
+    const blurEditor = () => {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && shell.contains(active)) active.blur();
+    };
+    const keepMobileMarginsPassive = (event: Event) => {
+      if (shell.getBoundingClientRect().width > 767) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const editorSurface = shell.querySelector(".superdoc-editor-container");
+      if (!editorSurface?.contains(target) || target.closest(".superdoc-page")) return;
+      if (target.closest("button, input, textarea, select, [role='button'], .efs-comments-layer")) return;
+      lastMarginPress = Date.now();
+      if (event.type === "click") event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      window.setTimeout(blurEditor, 0);
+    };
+    const undoMarginFocus = (event: FocusEvent) => {
+      if (Date.now() - lastMarginPress > 600) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && target.isContentEditable) window.setTimeout(blurEditor, 0);
+    };
+    shell.addEventListener("pointerdown", keepMobileMarginsPassive, true);
+    shell.addEventListener("click", keepMobileMarginsPassive, true);
+    shell.addEventListener("focusin", undoMarginFocus, true);
+    return () => {
+      shell.removeEventListener("pointerdown", keepMobileMarginsPassive, true);
+      shell.removeEventListener("click", keepMobileMarginsPassive, true);
+      shell.removeEventListener("focusin", undoMarginFocus, true);
+    };
+  }, [ready]);
 
   useEffect(() => {
     const shell = shellRef.current;
@@ -576,6 +654,21 @@ export function SuperDocWritingEditor({
         zoom={{ initial: 90, mode: "manual" }}
         ui={editorUi}
         modules={STUDIO_SUPERDOC_MODULES}
+        proofing={{
+          enabled: true,
+          provider: proofingProvider,
+          defaultLanguage: volume.documentLanguage,
+          debounceMs: 650,
+          maxSuggestions: 6,
+          visibleFirst: true,
+          allowIgnoreWord: true,
+          maxSegmentsPerBatch: 24,
+          onProofingError: (error) => {
+            if (proofingErrorShownRef.current) return;
+            proofingErrorShownRef.current = true;
+            onError(error.message || "Le correcteur orthographique n’est pas disponible.");
+          },
+        }}
         className="min-h-0 min-w-0 max-w-full flex-1 overflow-hidden"
         style={{ height: "100%", minHeight: 0, width: "100%", maxWidth: "100%" }}
         renderLoading={() => <div className="grid h-full min-h-72 place-items-center text-sm text-[#8f8996]"><span className="flex items-center gap-2"><LoaderCircle className="size-4 animate-spin" /> Préparation des pages…</span></div>}
@@ -740,10 +833,7 @@ function WritingCommentsLayer({
 function attachDrawingLayer(
   page: HTMLElement,
   pageIndex: number,
-  anchorBlockId: string,
   drawings: WritingDrawingStroke[],
-  tool: { enabled: boolean; color: string; size: number },
-  onAddDrawing: (stroke: WritingDrawingStroke) => void,
 ) {
   const namespace = "http://www.w3.org/2000/svg";
   const layer = document.createElementNS(namespace, "svg");
@@ -753,71 +843,140 @@ function attachDrawingLayer(
   layer.setAttribute("aria-hidden", "true");
   Object.assign(layer.style, {
     position: "absolute", inset: "0", width: "100%", height: "100%", zIndex: "16",
-    pointerEvents: tool.enabled ? "auto" : "none", touchAction: tool.enabled ? "none" : "auto",
+    pointerEvents: "none", touchAction: "none",
   });
 
   for (const stroke of drawings.filter((item) => item.pageIndex === pageIndex)) {
     layer.append(createDrawingPath(namespace, stroke.points, stroke.color, stroke.size));
   }
 
-  let active: { pointerId: number; points: Array<{ x: number; y: number }>; path: SVGPathElement } | null = null;
-  const consumePointerEvent = (event: PointerEvent) => {
+  page.style.position = "relative";
+  page.append(layer);
+  return () => layer.remove();
+}
+
+function attachDrawingShield(
+  shell: HTMLElement,
+  tool: { enabled: boolean; color: string; size: number },
+  onAddDrawing: (stroke: WritingDrawingStroke) => void,
+) {
+  const shield = document.createElement("div");
+  shield.className = "efs-drawing-shield";
+  shield.setAttribute("aria-hidden", "true");
+  Object.assign(shield.style, {
+    position: "absolute", zIndex: "24", cursor: "crosshair", touchAction: "none",
+  });
+  shell.append(shield);
+
+  const editorSurface = shell.querySelector<HTMLElement>(".superdoc-editor-container");
+  const positionShield = () => {
+    if (!editorSurface) return;
+    const shellRect = shell.getBoundingClientRect();
+    const editorRect = editorSurface.getBoundingClientRect();
+    const scaleX = shell.offsetWidth ? shellRect.width / shell.offsetWidth : 1;
+    const scaleY = shell.offsetHeight ? shellRect.height / shell.offsetHeight : scaleX;
+    Object.assign(shield.style, {
+      left: `${(editorRect.left - shellRect.left) / Math.max(scaleX, 0.01)}px`,
+      top: `${(editorRect.top - shellRect.top) / Math.max(scaleY, 0.01)}px`,
+      width: `${editorRect.width / Math.max(scaleX, 0.01)}px`,
+      height: `${editorRect.height / Math.max(scaleY, 0.01)}px`,
+    });
+  };
+  positionShield();
+  const resizeObserver = new ResizeObserver(positionShield);
+  resizeObserver.observe(shell);
+  if (editorSurface) resizeObserver.observe(editorSurface);
+  window.addEventListener("resize", positionShield);
+
+  type ActiveStroke = {
+    pointerId: number;
+    pageIndex: number;
+    page: HTMLElement;
+    layer: SVGSVGElement;
+    anchor: RenderedDrawingAnchor;
+    points: Array<{ x: number; y: number }>;
+    path: SVGPathElement;
+  };
+  let active: ActiveStroke | null = null;
+  const consume = (event: PointerEvent) => {
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
   };
-  const pointFromEvent = (event: PointerEvent) => {
-    const rect = layer.getBoundingClientRect();
+  const pointForPage = (page: HTMLElement, event: PointerEvent) => {
+    const rect = page.getBoundingClientRect();
     return {
       x: Math.min(1, Math.max(0, (event.clientX - rect.left) / Math.max(1, rect.width))),
       y: Math.min(1, Math.max(0, (event.clientY - rect.top) / Math.max(1, rect.height))),
     };
   };
   const pointerDown = (event: PointerEvent) => {
-    if (!tool.enabled || (event.pointerType === "mouse" && event.button !== 0)) return;
-    consumePointerEvent(event);
-    const points = [pointFromEvent(event)];
-    const path = createDrawingPath(namespace, points, tool.color, tool.size);
+    consume(event);
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    const pages = getRenderedSuperDocPages(shell);
+    const pageIndex = pages.findIndex((page) => {
+      const rect = page.getBoundingClientRect();
+      return event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
+    });
+    if (pageIndex < 0) return;
+    const page = pages[pageIndex];
+    const layer = page.querySelector<SVGSVGElement>(":scope > .efs-drawing-layer");
+    if (!layer) return;
+    const anchor = getRenderedPageAnchors(shell).get(pageIndex) ?? {};
+    const points = [pointForPage(page, event)];
+    const path = createDrawingPath("http://www.w3.org/2000/svg", points, tool.color, tool.size);
     layer.append(path);
-    active = { pointerId: event.pointerId, points, path };
-    layer.setPointerCapture(event.pointerId);
+    active = { pointerId: event.pointerId, pageIndex, page, layer, anchor, points, path };
+    shield.setPointerCapture(event.pointerId);
   };
   const pointerMove = (event: PointerEvent) => {
     if (!active || active.pointerId !== event.pointerId) return;
-    consumePointerEvent(event);
-    const point = pointFromEvent(event);
+    consume(event);
+    const point = pointForPage(active.page, event);
     const previous = active.points.at(-1)!;
     if (Math.hypot(point.x - previous.x, point.y - previous.y) < 0.0015) return;
     active.points.push(point);
     active.path.setAttribute("d", drawingPathData(active.points));
   };
-  const finishStroke = (event: PointerEvent) => {
+  const finish = (event: PointerEvent) => {
     if (!active || active.pointerId !== event.pointerId) return;
-    consumePointerEvent(event);
-    if (active.points.length === 1) active.points.push({ x: Math.min(1, active.points[0].x + 0.001), y: active.points[0].y });
+    consume(event);
+    if (active.points.length === 1) {
+      active.points.push({ x: Math.min(1, active.points[0].x + 0.001), y: active.points[0].y });
+    }
     onAddDrawing({
       id: createId("drawing"),
-      pageIndex,
-      anchorBlockId: anchorBlockId || undefined,
+      pageIndex: active.pageIndex,
+      anchorBlockId: active.anchor.blockId || undefined,
+      anchorParagraphIndex: active.anchor.paragraphIndex,
       color: tool.color,
       size: tool.size,
       points: active.points,
     });
-    if (layer.hasPointerCapture(event.pointerId)) layer.releasePointerCapture(event.pointerId);
+    if (shield.hasPointerCapture(event.pointerId)) shield.releasePointerCapture(event.pointerId);
     active = null;
   };
-  layer.addEventListener("pointerdown", pointerDown, true);
-  layer.addEventListener("pointermove", pointerMove, true);
-  layer.addEventListener("pointerup", finishStroke, true);
-  layer.addEventListener("pointercancel", finishStroke, true);
-  page.style.position = "relative";
-  page.append(layer);
-  return () => layer.remove();
+  shield.addEventListener("pointerdown", pointerDown, true);
+  shield.addEventListener("pointermove", pointerMove, true);
+  shield.addEventListener("pointerup", finish, true);
+  shield.addEventListener("pointercancel", finish, true);
+
+  return () => {
+    resizeObserver.disconnect();
+    window.removeEventListener("resize", positionShield);
+    if (active) active.path.remove();
+    shield.remove();
+  };
 }
 
 function getPageBlockIds(page: HTMLElement) {
   const preferred = [...page.querySelectorAll<HTMLElement>("[data-layout-story='body'][data-layout-block-ref]")];
-  const candidates = preferred.length
+  const paragraphFragments = preferred.filter((item) =>
+    item.classList.contains("superdoc-fragment") && Boolean(item.querySelector(".superdoc-line")),
+  );
+  const candidates = paragraphFragments.length
+    ? paragraphFragments
+    : preferred.length
     ? preferred
     : [...page.querySelectorAll<HTMLElement>("[data-layout-block-ref]")];
   return [...new Set(candidates.map((item) => item.getAttribute("data-layout-block-ref") ?? "").filter(Boolean))];
@@ -825,11 +984,15 @@ function getPageBlockIds(page: HTMLElement) {
 
 function getRenderedPageAnchors(shell: HTMLElement) {
   const seen = new Set<string>();
-  const anchors = new Map<number, string>();
+  const paragraphIndices = new Map<string, number>();
+  const anchors = new Map<number, RenderedDrawingAnchor>();
   getRenderedSuperDocPages(shell).forEach((page, pageIndex) => {
     const blockIds = getPageBlockIds(page);
+    blockIds.forEach((blockId) => {
+      if (!paragraphIndices.has(blockId)) paragraphIndices.set(blockId, paragraphIndices.size);
+    });
     const anchor = blockIds.find((blockId) => !seen.has(blockId)) ?? blockIds[0];
-    if (anchor) anchors.set(pageIndex, anchor);
+    if (anchor) anchors.set(pageIndex, { blockId: anchor, paragraphIndex: paragraphIndices.get(anchor) });
     blockIds.forEach((blockId) => seen.add(blockId));
   });
   return anchors;
@@ -859,6 +1022,11 @@ function advanceSelectionTarget(target: SelectionTarget | null, text: string): S
 
 function getTextBlockId(target: SelectionTarget | null | undefined) {
   return target?.start.kind === "text" ? target.start.blockId : null;
+}
+
+function selectionIsCollapsed(target: SelectionTarget) {
+  return target.start.kind === "text" && target.end.kind === "text" &&
+    target.start.blockId === target.end.blockId && target.start.offset === target.end.offset;
 }
 
 function isBodyTextStyle(styleId: string, styleName: string | null) {

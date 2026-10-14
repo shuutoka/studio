@@ -600,15 +600,15 @@ textarea {
   -webkit-user-select: none !important;
 }
 
-/* In pen mode the SVG is the only interactive page child. This prevents the
- * desktop editor from starting a text selection underneath the pointer. */
-.superdoc-writing-shell[data-drawing-active="true"] .superdoc-page > :not(.efs-drawing-layer) {
+.superdoc-writing-shell .efs-drawing-layer {
   pointer-events: none !important;
+  touch-action: none !important;
 }
 
-.superdoc-writing-shell[data-drawing-active="true"] .efs-drawing-layer {
-  pointer-events: auto !important;
-  touch-action: none !important;
+.superdoc-writing-shell .efs-drawing-shield {
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .superdoc-writing-shell[data-comments-visible="false"] .superdoc-comment-highlight {
@@ -671,6 +671,10 @@ textarea {
   .superdoc-writing-shell .superdoc__layers {
     overflow-x: hidden !important;
     overscroll-behavior: contain;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: pan-y;
+    -webkit-tap-highlight-color: transparent;
   }
 
   .writing-workspace .superdoc-writing-shell :is(
@@ -697,6 +701,14 @@ textarea {
   .superdoc-writing-shell .superdoc-page {
     flex: none !important;
     max-width: none !important;
+    user-select: text;
+    -webkit-user-select: text;
+    touch-action: pan-y;
+  }
+
+  .superdoc-writing-shell[data-drawing-active="true"] .superdoc-page {
+    user-select: none !important;
+    -webkit-user-select: none !important;
   }
 
   .superdoc-writing-shell .superdoc-writing-status {
@@ -764,6 +776,48 @@ textarea {
   background-color: #1b1821 !important;
   border-color: #34303b !important;
   color: #d8d3dd !important;
+}
+
+[data-studio-theme="light"] :is(.toolbar-dropdown-menu, .sd-font-combobox__listbox, .link-input-ctn, .option-grid-ctn) {
+  background-color: #ffffff !important;
+  border-color: #d8d2da !important;
+  color: #302b34 !important;
+}
+
+[data-studio-theme="light"] :is(.toolbar-dropdown-option, .sd-font-combobox__option, .style-name, .none-option, .toolbar-table-actions__item) {
+  color: #302b34 !important;
+}
+
+[data-studio-theme="light"] :is(.toolbar-dropdown-option:not(.sd-render):hover, .toolbar-dropdown-option:not(.sd-render).sd-selected, .sd-font-combobox__option:hover, .sd-font-combobox__option.sd-active, .sd-font-combobox__option.sd-selected, .style-name:hover, .v2-context-menu__item--highlighted, .v2-table-actions__item--highlighted) {
+  background: #f9dfe2 !important;
+  color: #302b34 !important;
+}
+
+@media (max-width: 767px) {
+  [data-slot="select-content"],
+  [data-slot="dropdown-menu-content"],
+  [data-slot="popover-content"] {
+    background-color: var(--popover) !important;
+    color: var(--popover-foreground) !important;
+  }
+
+  [data-slot="select-item"],
+  [data-slot="dropdown-menu-item"] {
+    color: var(--popover-foreground) !important;
+  }
+
+  [data-slot="select-item"]:focus,
+  [data-slot="select-item"][data-highlighted],
+  [data-slot="dropdown-menu-item"]:focus,
+  [data-slot="dropdown-menu-item"][data-highlighted] {
+    background-color: var(--accent) !important;
+    color: var(--accent-foreground) !important;
+  }
+
+  :is(.toolbar-dropdown-menu, .sd-font-combobox__listbox, .link-input-ctn, .option-grid-ctn) *,
+  :is(.v2-context-menu, .v2-table-actions) * {
+    color: inherit;
+  }
 }
 
 [data-studio-theme="normal"] :is(.toolbar-dropdown-option, .sd-font-combobox__option, .style-name, .none-option, .toolbar-table-actions__item),

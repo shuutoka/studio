@@ -68,6 +68,7 @@ export function StudioAppV3() {
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [focusMode, setFocusMode] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectType, setNewProjectType] = useState<ProjectType>("manga");
   const [deleteTarget, setDeleteTarget] = useState<StudioProject | null>(null);
@@ -376,6 +377,7 @@ export function StudioAppV3() {
               onDeleteProject={() => setDeleteTarget(activeProject)} settings={settings}
               updateSettings={updateSettings} focusMode={focusMode}
               onToggleFocus={() => setFocusMode((current) => !current)}
+              onOpenSettings={() => setSettingsDialogOpen(true)}
             />
           ) : globalView === "library" ? (
             <GlobalLibrary projects={projects} onOpenCharacter={openGlobalCharacter} />
@@ -392,6 +394,19 @@ export function StudioAppV3() {
       </div>
 
       <input ref={importInputRef} className="hidden" type="file" accept=".efs,.zip,.efstudio.zip,application/zip,application/vnd.enfer-fatal-studio" onChange={(event) => void importBackup(event.target.files?.[0])} />
+
+      <Dialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen}>
+        <DialogContent className="h-[min(92svh,900px)] max-w-[min(96vw,1200px)] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden border-white/10 bg-[#17151d] p-0 text-[#eeeaf2] sm:max-w-6xl">
+          <DialogHeader className="sr-only"><DialogTitle>Paramètres du Studio</DialogTitle><DialogDescription>Modifier les préférences sans quitter l’espace d’écriture.</DialogDescription></DialogHeader>
+          <SettingsView
+            settings={settings}
+            updateSettings={updateSettings}
+            onUploadFont={uploadFont}
+            onRemoveFont={removeFont}
+            onOpenLegal={() => { setSettingsDialogOpen(false); showGlobal("legal"); }}
+          />
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={startupOpen}>
         <DialogContent className="border-white/10 bg-[#17151d] text-[#eeeaf2]" onPointerDownOutside={(event) => event.preventDefault()} onEscapeKeyDown={(event) => event.preventDefault()}>

@@ -26,6 +26,8 @@ export type WritingDrawingStroke = {
   pageIndex: number;
   /** OOXML paragraph id used to keep the annotation on its laid-out page during export. */
   anchorBlockId?: string;
+  /** Paragraph order fallback for DOCX files that do not preserve OOXML paragraph ids. */
+  anchorParagraphIndex?: number;
   color: string;
   size: number;
   points: WritingDrawingPoint[];
@@ -107,6 +109,8 @@ export type StudioVolume = {
   footerType: FooterType;
   footerText: string;
   footerFormat: FooterFormat;
+  /** Language used by the local spell checker and stored in the DOCX. */
+  documentLanguage: WritingLanguage;
   chapters: StudioChapter[];
   /**
    * SuperDoc keeps the canonical document as a DOCX blob in IndexedDB. These
@@ -278,7 +282,7 @@ export type StudioSettings = {
 };
 
 export type StudioProject = {
-  schemaVersion: 10;
+  schemaVersion: 12;
   id: string;
   name: string;
   description: string;
@@ -305,6 +309,16 @@ export type StudioProject = {
 };
 
 export type WritingDocumentStats = Record<WritingCounterKey, number>;
+
+export type WritingLanguage = "fr-FR" | "en-US" | "en-GB" | "es-ES" | "de-DE";
+
+export const WRITING_LANGUAGES: ReadonlyArray<{ value: WritingLanguage; label: string }> = [
+  { value: "fr-FR", label: "Français (France)" },
+  { value: "en-US", label: "Anglais (États-Unis)" },
+  { value: "en-GB", label: "Anglais (Royaume-Uni)" },
+  { value: "es-ES", label: "Espagnol" },
+  { value: "de-DE", label: "Allemand" },
+];
 
 export type ProjectStats = {
   volumes: number;
@@ -530,6 +544,7 @@ export function createEmptyVolume(index = 1, title = `Volume ${index}`, pageForm
     footerType: "none",
     footerText: "",
     footerFormat: "page-of-total",
+    documentLanguage: "fr-FR",
     chapters: [{ id: createId("chapter"), title: "Contenu", pages: [createEmptyPage()] }],
     documentEngine: "superdoc",
     documentText: "",
@@ -629,7 +644,7 @@ export function getProjectStats(project: StudioProject): ProjectStats {
 export function createBlankProject(name: string, projectType: ProjectType = "manga"): StudioProject {
   const now = new Date().toISOString();
   return {
-    schemaVersion: 10, id: createId("project"), name: name.trim() || "Projet sans titre",
+    schemaVersion: 12, id: createId("project"), name: name.trim() || "Projet sans titre",
     description: "", cardColor: "#4d1824", bannerMediaId: null, status: "idea", projectType,
     defaultPageFormat: projectType === "novel" ? "novel" : projectType === "free" ? "free" : "a4",
     targetPages: 0, footerType: "none", footerText: "",
@@ -809,7 +824,7 @@ export function normalizeProject(value: unknown): StudioProject {
     .flatMap((chapter) => chapter.pages ?? [])
     .find((page) => page.footerType && page.footerType !== "none");
   return {
-    schemaVersion: 10,
+    schemaVersion: 12,
     id: input.id,
     name: input.name,
     description: typeof input.description === "string" ? input.description : "",
@@ -841,6 +856,7 @@ export function normalizeProject(value: unknown): StudioProject {
         ? volume.footerText
         : typeof input.footerText === "string" ? input.footerText : legacyFooterPage?.footerText ?? "",
       footerFormat: normalizeFooterFormat(volume.footerFormat),
+      documentLanguage: normalizeWritingLanguage(volume.documentLanguage),
       chapters: Array.isArray(volume.chapters) ? volume.chapters.map((chapter, chapterIndex) => ({
         id: typeof chapter.id === "string" ? chapter.id : createId("chapter"),
         title: typeof chapter.title === "string" ? chapter.title : `Chapitre ${chapterIndex + 1}`,
@@ -895,6 +911,12 @@ function normalizeFooterFormat(value: unknown): FooterFormat {
   ].includes(String(value)) ? value as FooterFormat : "page-of-total";
 }
 
+function normalizeWritingLanguage(value: unknown): WritingLanguage {
+  return WRITING_LANGUAGES.some((language) => language.value === value)
+    ? value as WritingLanguage
+    : "fr-FR";
+}
+
 function normalizePageFormat(value: unknown, fallback: unknown): PageFormat {
   const candidate = ["a4", "a5", "pocket", "novel", "large"].includes(String(value))
     ? value
@@ -925,6 +947,9 @@ function normalizeWritingDrawings(value: unknown): WritingDrawingStroke[] {
       pageIndex: Number.isFinite(input.pageIndex) ? Math.max(0, Math.trunc(Number(input.pageIndex))) : 0,
       anchorBlockId: typeof input.anchorBlockId === "string" && input.anchorBlockId.trim()
         ? input.anchorBlockId.trim()
+        : undefined,
+      anchorParagraphIndex: Number.isFinite(input.anchorParagraphIndex)
+        ? Math.max(0, Math.trunc(Number(input.anchorParagraphIndex)))
         : undefined,
       color: normalizeColor(input.color, "#ef4f5f"),
       size: Number.isFinite(input.size) ? Math.min(24, Math.max(1, Number(input.size))) : 4,
