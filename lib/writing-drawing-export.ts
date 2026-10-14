@@ -1,6 +1,11 @@
 import { applyDocxDrawingOverlays, type DocxDrawingOverlay } from "@/lib/writing-docx";
 import { PAGE_FORMATS, type PageFormat, type WritingDrawingStroke } from "@/lib/studio";
 
+export type RenderedDrawingAnchor = {
+  blockId?: string;
+  paragraphIndex?: number;
+};
+
 /**
  * Rasterizes the Studio's page-relative pen strokes and embeds one transparent
  * full-page image for every annotated page. The image is anchored to the first
@@ -11,7 +16,7 @@ export async function exportDocxWithDrawings(
   blob: Blob,
   drawings: WritingDrawingStroke[],
   pageFormat: PageFormat,
-  renderedPageAnchors: ReadonlyMap<number, string> = new Map(),
+  renderedPageAnchors: ReadonlyMap<number, RenderedDrawingAnchor> = new Map(),
 ) {
   if (!drawings.length) return blob;
 
@@ -22,29 +27,22 @@ export async function exportDocxWithDrawings(
     pages.set(drawing.pageIndex, list);
   }
 
-  const unresolvedPages: number[] = [];
   const overlays: DocxDrawingOverlay[] = [];
   const format = PAGE_FORMATS[pageFormat].height ? PAGE_FORMATS[pageFormat] : PAGE_FORMATS.a4;
 
   for (const [pageIndex, strokes] of [...pages].sort(([left], [right]) => left - right)) {
-    const anchorBlockId = renderedPageAnchors.get(pageIndex)
-      ?? strokes.find((stroke) => stroke.anchorBlockId)?.anchorBlockId;
-    if (!anchorBlockId) {
-      unresolvedPages.push(pageIndex + 1);
-      continue;
-    }
+    const renderedAnchor = renderedPageAnchors.get(pageIndex);
+    const storedAnchor = strokes.find((stroke) => stroke.anchorBlockId || Number.isFinite(stroke.anchorParagraphIndex));
     overlays.push({
       pageIndex,
-      anchorBlockId,
+      anchorBlockId: renderedAnchor?.blockId ?? storedAnchor?.anchorBlockId,
+      anchorParagraphIndex: renderedAnchor?.paragraphIndex ?? storedAnchor?.anchorParagraphIndex,
       pngBytes: await rasterizeDrawingPage(strokes, format.width, format.height ?? PAGE_FORMATS.a4.height!),
       widthPx: format.width,
       heightPx: format.height ?? PAGE_FORMATS.a4.height!,
     });
   }
 
-  if (unresolvedPages.length) {
-    throw new Error(`Ouvrez ce volume dans l’espace Écriture avant l’export afin de placer les dessins de la page ${unresolvedPages.join(", ")}.`);
-  }
   return applyDocxDrawingOverlays(blob, overlays);
 }
 
