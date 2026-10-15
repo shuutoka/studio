@@ -1,43 +1,33 @@
-import nspell, { type NSpell } from "nspell";
+import Typo from "typo-js";
 
-type WorkerSegment = {
-  id: string;
-  text: string;
-  language?: string | null;
-};
-
-type WorkerIssue = {
+type Segment = { id: string; text: string; language?: string | null };
+type Issue = {
   segmentId: string;
   start: number;
   end: number;
   kind: "spelling";
   message: string;
   replacements: string[];
+  ruleId: "fr-hunspell";
 };
 
-type CheckMessage = {
-  type: "check";
-  id: number;
-  baseUrl: string;
-  defaultLanguage: string;
-  maxSuggestions: number;
-  segments: WorkerSegment[];
-};
-
-type PreloadMessage = {
-  type: "preload";
-  id: number;
-  baseUrl: string;
-  language: string;
-};
-
-type CancelMessage = { type: "cancel"; id: number };
-type IncomingMessage = CheckMessage | PreloadMessage | CancelMessage;
+type IncomingMessage =
+  | { type: "preload"; id: number; baseUrl: string }
+  | { type: "cancel"; id: number }
+  | {
+      type: "check";
+      id: number;
+      baseUrl: string;
+      defaultLanguage: string;
+      maxSuggestions: number;
+      personalWords: string[];
+      segments: Segment[];
+    };
 
 type OutgoingMessage =
-  | { type: "result"; id: number; issues: WorkerIssue[] }
   | { type: "ready"; id: number }
   | { type: "cancelled"; id: number }
+  | { type: "result"; id: number; issues: Issue[] }
   | { type: "error"; id: number; message: string };
 
 type WorkerScope = {
@@ -46,91 +36,63 @@ type WorkerScope = {
 };
 
 const scope = globalThis as unknown as WorkerScope;
-const checkerCache = new Map<string, Promise<NSpell>>();
-const correctnessCache = new Map<string, boolean>();
-const suggestionCache = new Map<string, string[]>();
+const wordPattern = /[\p{L}\p{M}]+/gu;
 const cancelledRequests = new Set<number>();
-const wordPattern = /[\p{L}\p{M}]+(?:[’'-][\p{L}\p{M}]+)*/gu;
-const maxIssuesPerRequest = 100;
-const maxSuggestionLookupsPerRequest = 60;
+const correctCache = new Map<string, boolean>();
+const suggestionCache = new Map<string, string[]>();
+const maxIssuesPerCheck = 60;
+const maxSuggestionLookupsPerCheck = 4;
+let dictionaryPromise: Promise<Typo> | null = null;
 
-function languageBase(language: string | null | undefined) {
-  const base = language?.toLocaleLowerCase("en").split(/[-_]/u)[0];
-  return ["de", "en", "es", "fr"].includes(base ?? "") ? base! : "fr";
-}
-
-async function loadChecker(baseUrl: string, language: string | null | undefined) {
-  const base = languageBase(language);
-  const cached = checkerCache.get(base);
-  if (cached) return cached;
-
-  const loading = Promise.all([
-    fetch(new URL(`${base}.aff`, baseUrl)).then(readDictionaryResponse),
-    fetch(new URL(`${base}.dic`, baseUrl)).then(readDictionaryResponse),
-  ]).then(([aff, dic]) => nspell({ aff, dic })).catch((error) => {
-    checkerCache.delete(base);
+function loadDictionary(baseUrl: string) {
+  if (dictionaryPromise) return dictionaryPromise;
+  dictionaryPromise = Promise.all([
+    fetch(new URL("fr.aff", baseUrl)).then(readDictionaryText),
+    fetch(new URL("fr.dic", baseUrl)).then(readDictionaryText),
+  ]).then(([affData, wordsData]) => new Typo("fr_FR", affData, wordsData)).catch((error) => {
+    dictionaryPromise = null;
     throw error;
   });
-  checkerCache.set(base, loading);
-  return loading;
+  return dictionaryPromise;
 }
 
-async function readDictionaryResponse(response: Response) {
-  if (!response.ok) throw new Error(`Dictionnaire orthographique indisponible (${response.status}).`);
-  // nspell accepts strings directly. Passing a browser Uint8Array looks valid
-  // but prevents Hunspell affixes and suggestions from being interpreted.
+async function readDictionaryText(response: Response) {
+  if (!response.ok) throw new Error(`Dictionnaire français indisponible (${response.status}).`);
   return response.text();
 }
 
-function getCached<T>(cache: Map<string, T>, key: string) {
-  const value = cache.get(key);
-  if (value === undefined) return undefined;
-  cache.delete(key);
-  cache.set(key, value);
-  return value;
-}
-
-function setCached<T>(cache: Map<string, T>, key: string, value: T, limit: number) {
-  cache.delete(key);
-  cache.set(key, value);
-  while (cache.size > limit) cache.delete(cache.keys().next().value!);
-}
-
-function pauseForMessages() {
-  return new Promise<void>((resolve) => setTimeout(resolve, 0));
-}
-
-async function check(message: CheckMessage) {
-  const issues: WorkerIssue[] = [];
-  let inspectedWords = 0;
+async function check(message: Extract<IncomingMessage, { type: "check" }>) {
+  const dictionary = await loadDictionary(message.baseUrl);
+  const personalWords = new Set(message.personalWords.map(normalizeWord));
+  const issues: Issue[] = [];
+  let checkedWords = 0;
   let suggestionLookups = 0;
 
   for (const segment of message.segments) {
-    if (cancelledRequests.has(message.id) || issues.length >= maxIssuesPerRequest) break;
-    const language = languageBase(segment.language ?? message.defaultLanguage);
-    const checker = await loadChecker(message.baseUrl, language);
-
+    if (!isFrench(segment.language ?? message.defaultLanguage)) continue;
     for (const match of segment.text.matchAll(wordPattern)) {
-      if (cancelledRequests.has(message.id) || issues.length >= maxIssuesPerRequest) break;
-      inspectedWords += 1;
-      if (inspectedWords % 24 === 0) await pauseForMessages();
+      if (cancelledRequests.has(message.id) || issues.length >= maxIssuesPerCheck) break;
+      checkedWords += 1;
+      if (checkedWords % 20 === 0) await pauseForMessages();
 
       const word = match[0];
       if (word.length < 2 || /^(?:[A-ZÀ-ÖØ-Þ]\.)+$/u.test(word)) continue;
-      const normalizedWord = word.normalize("NFC").toLocaleLowerCase(language);
-      const cacheKey = `${language}:${normalizedWord}`;
-      let correct = getCached(correctnessCache, cacheKey);
+      const normalized = normalizeWord(word);
+      if (personalWords.has(normalized)) continue;
+
+      let correct = readCache(correctCache, normalized);
       if (correct === undefined) {
-        correct = checker.correct(word);
-        setCached(correctnessCache, cacheKey, correct, 12_000);
+        correct = dictionary.check(word);
+        writeCache(correctCache, normalized, correct, 8_000);
       }
       if (correct) continue;
 
-      let replacements = getCached(suggestionCache, cacheKey);
-      if (replacements === undefined && suggestionLookups < maxSuggestionLookupsPerRequest) {
+      let replacements = readCache(suggestionCache, normalized);
+      if (replacements === undefined && suggestionLookups < maxSuggestionLookupsPerCheck) {
         suggestionLookups += 1;
-        replacements = checker.suggest(word).slice(0, message.maxSuggestions);
-        setCached(suggestionCache, cacheKey, replacements, 3_000);
+        replacements = dictionary.suggest(word, Math.min(5, message.maxSuggestions))
+          .filter((suggestion) => /^[\p{L}\p{M}]+$/u.test(suggestion));
+        writeCache(suggestionCache, normalized, replacements, 1_500);
       }
 
       issues.push({
@@ -140,8 +102,10 @@ async function check(message: CheckMessage) {
         kind: "spelling",
         message: `Orthographe : « ${word} »`,
         replacements: replacements ?? [],
+        ruleId: "fr-hunspell",
       });
     }
+    if (issues.length >= maxIssuesPerCheck) break;
   }
 
   if (cancelledRequests.delete(message.id)) {
@@ -158,21 +122,45 @@ scope.addEventListener("message", (event) => {
     setTimeout(() => cancelledRequests.delete(message.id), 30_000);
     return;
   }
-
   if (message.type === "preload") {
-    void loadChecker(message.baseUrl, message.language)
+    void loadDictionary(message.baseUrl)
       .then(() => scope.postMessage({ type: "ready", id: message.id }))
-      .catch((error) => scope.postMessage({
-        type: "error",
-        id: message.id,
-        message: error instanceof Error ? error.message : "Le dictionnaire n’a pas pu être chargé.",
-      }));
+      .catch((error) => postError(message.id, error));
     return;
   }
-
-  void check(message).catch((error) => scope.postMessage({
-    type: "error",
-    id: message.id,
-    message: error instanceof Error ? error.message : "La correction orthographique a échoué.",
-  }));
+  void check(message).catch((error) => postError(message.id, error));
 });
+
+function postError(id: number, error: unknown) {
+  scope.postMessage({
+    type: "error",
+    id,
+    message: error instanceof Error ? error.message : "La correction orthographique a échoué.",
+  });
+}
+
+function isFrench(language: string | null | undefined) {
+  return language?.toLocaleLowerCase("fr").split(/[-_]/u)[0] === "fr";
+}
+
+function normalizeWord(word: string) {
+  return word.normalize("NFC").toLocaleLowerCase("fr-FR");
+}
+
+function pauseForMessages() {
+  return new Promise<void>((resolve) => setTimeout(resolve, 0));
+}
+
+function readCache<T>(cache: Map<string, T>, key: string) {
+  const value = cache.get(key);
+  if (value === undefined) return undefined;
+  cache.delete(key);
+  cache.set(key, value);
+  return value;
+}
+
+function writeCache<T>(cache: Map<string, T>, key: string, value: T, limit: number) {
+  cache.delete(key);
+  cache.set(key, value);
+  while (cache.size > limit) cache.delete(cache.keys().next().value!);
+}

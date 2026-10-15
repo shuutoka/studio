@@ -257,7 +257,7 @@ test("ships the Pansement writing, feedback and image-link fixes", async () => {
 
   assert.deepEqual([PAGE_FORMATS.a4.width, PAGE_FORMATS.a4.height], [794, 1123]);
   const settings = createDefaultSettings();
-  assert.equal(normalizeSettings(settings).schemaVersion, 8);
+  assert.equal(normalizeSettings(settings).schemaVersion, 9);
   assert.match(writingImport, /background-color/);
   assert.match(writingImport, /removeImportedFormatting/);
   assert.match(importButton, /Supprimer la mise en forme/);
@@ -287,7 +287,7 @@ test("renders the legal notice and requires feedback privacy consent", async () 
   assert.match(app, /globalView === "legal"/);
   assert.match(settingsView, /privacyAccepted/);
   assert.match(settingsView, /J’accepte que les informations saisies/);
-  assert.match(serviceWorker, /enfer-fatal-studio-proofing-worker-pages/);
+  assert.match(serviceWorker, /enfer-fatal-studio-superdoc-native-proofing/);
 });
 
 test("ships the native SuperDoc writing workspace and embeds documents in EFS backups", async () => {
@@ -304,7 +304,7 @@ test("ships the native SuperDoc writing workspace and embeds documents in EFS ba
   assert.match(superdocEditor, /"ai"/);
   assert.match(superdocEditor, /persistWritingDocument/);
   assert.match(writingDocument, /writing-docx/);
-  assert.match(projectFile, /formatVersion:\s*13/);
+  assert.match(projectFile, /formatVersion:\s*14/);
 });
 
 test("keeps SuperDoc inside the Studio viewport without continuous fit-width feedback", async () => {
@@ -349,7 +349,8 @@ test("reconnects Writing 2.1 to Studio preferences and native DOCX metadata", as
 
   const settings = normalizeSettings({ ...createDefaultSettings(), schemaVersion: 1 });
   const project = normalizeProject({ ...createBlankProject("Migration 2.1", "novel"), schemaVersion: 7 });
-  assert.equal(settings.schemaVersion, 8);
+  assert.equal(settings.schemaVersion, 9);
+  assert.deepEqual(settings.personalDictionary["fr-FR"], []);
   assert.equal(settings.writingTheme, "follow");
   assert.equal(project.schemaVersion, 13);
   assert.equal(project.volumes[0].documentLanguage, "fr-FR");
@@ -451,8 +452,8 @@ test("adds review drawings, anchored comments and per-volume paper formats witho
   assert.match(css, /touch-action: pan-y/);
 });
 
-test("adds local proofing, dashboard identity editing and mobile-safe drawing", async () => {
-  const { createBlankProject, normalizeProject, WRITING_LANGUAGES } = await vite.ssrLoadModule("/lib/studio.ts");
+test("uses native SuperDoc proofing with a read-only local French provider", async () => {
+  const { createBlankProject, createDefaultSettings, normalizeProject, normalizeSettings, WRITING_LANGUAGES } = await vite.ssrLoadModule("/lib/studio.ts");
   const project = createBlankProject("Langues", "novel");
   delete project.volumes[0].documentLanguage;
   delete project.volumes[0].spellcheckEnabled;
@@ -461,6 +462,10 @@ test("adds local proofing, dashboard identity editing and mobile-safe drawing", 
   assert.equal(normalized.volumes[0].documentLanguage, "fr-FR");
   assert.equal(normalized.volumes[0].spellcheckEnabled, true);
   assert.equal(WRITING_LANGUAGES.length, 5);
+  const legacySettings = createDefaultSettings();
+  legacySettings.personalDictionary = { "fr-FR": ["Aurélien", "aurélien", "deux mots"], "en-US": [], "en-GB": [], "es-ES": [], "de-DE": [] };
+  const normalizedSettings = normalizeSettings(legacySettings);
+  assert.deepEqual(normalizedSettings.personalDictionary["fr-FR"], ["Aurélien"]);
 
   const app = await readFile(path.join(root, "components/studio/studio-app-v3.tsx"), "utf8");
   const dashboard = await readFile(path.join(root, "components/studio/studio-app.tsx"), "utf8");
@@ -471,6 +476,7 @@ test("adds local proofing, dashboard identity editing and mobile-safe drawing", 
   const proofingWorker = await readFile(path.join(root, "lib/writing-proofing.worker.ts"), "utf8");
   const docx = await readFile(path.join(root, "lib/writing-docx.ts"), "utf8");
   const css = await readFile(path.join(root, "app/globals.css"), "utf8");
+  const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
 
   assert.match(app, /settingsDialogOpen/);
   assert.match(app, /Modifier les préférences sans quitter l’espace d’écriture/);
@@ -481,14 +487,20 @@ test("adds local proofing, dashboard identity editing and mobile-safe drawing", 
   assert.match(controls, /Correction automatique/);
   assert.match(controls, /Tout le volume/);
   assert.match(controls, /Sélection/);
-  assert.match(proofing, /enfer-fatal-local-spelling-worker/);
+  assert.match(controls, /Dictionnaire personnel/);
+  assert.match(proofing, /enfer-fatal-superdoc-french-proofing/);
   assert.match(proofing, /requiresNetwork: false/);
-  assert.match(proofing, /new Worker/);
+  assert.match(proofingWorker, /segmentId: segment\.id/);
+  assert.match(proofingWorker, /start: match\.index/);
+  assert.match(proofingWorker, /end: match\.index \+ word\.length/);
+  assert.match(proofingWorker, /dictionary\.suggest/);
   assert.match(proofing, /setDefaultLanguage/);
-  assert.match(proofingWorker, /maxIssuesPerRequest = 100/);
-  assert.match(proofingWorker, /suggestionCache/);
-  assert.match(proofingWorker, /checker\.suggest/);
-  assert.match(proofingWorker, /return response\.text\(\)/);
+  assert.match(proofing, /new Worker/);
+  assert.doesNotMatch(`${proofing}\n${proofingWorker}`, /replaceFile|innerHTML|outerHTML|textContent|activeEditor|querySelector/);
+  assert.match(editor, /allowIgnoreWord: true/);
+  assert.match(editor, /proofing=\{proofingConfig\}/);
+  assert.equal(packageJson.dependencies["typo-js"], "^1.4.0");
+  assert.equal(packageJson.dependencies.nspell, undefined);
   assert.match(dashboard, /Pages écrites \/ objectif/);
   assert.match(dashboard, /\$\{stats\.pages\} \/ \$\{project\.targetPages/);
   assert.match(docx, /applyDocxLanguage/);
@@ -496,6 +508,16 @@ test("adds local proofing, dashboard identity editing and mobile-safe drawing", 
   assert.match(editor, /virtualKeyboard/);
   assert.match(css, /efs-drawing-shield/);
   assert.match(css, /\[data-slot="select-content"\]/);
+});
+
+test("the local French dictionary returns a targeted suggestion", async () => {
+  const { default: Typo } = await import("typo-js");
+  const affData = await readFile(path.join(root, "public/proofing/fr.aff"), "utf8");
+  const wordsData = await readFile(path.join(root, "public/proofing/fr.dic"), "utf8");
+  const dictionary = new Typo("fr_FR", affData, wordsData);
+  assert.equal(dictionary.check("bonjour"), true);
+  assert.equal(dictionary.check("bonjor"), false);
+  assert.ok(dictionary.suggest("bonjor", 4).includes("bonjour"));
 });
 
 test("formats page numbers and dates for the native footer", async () => {

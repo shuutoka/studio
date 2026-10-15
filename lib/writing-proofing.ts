@@ -1,15 +1,15 @@
 import type { SuperDocConfig } from "@superdoc/react";
 
-import type { WritingLanguage } from "@/lib/studio";
+import type { StudioSettings, WritingLanguage } from "@/lib/studio";
 
 type ProofingProvider = NonNullable<NonNullable<SuperDocConfig["proofing"]>["provider"]>;
 type ProofingRequest = Parameters<ProofingProvider["check"]>[0];
 type ProofingResult = Awaited<ReturnType<ProofingProvider["check"]>>;
 
 type WorkerResponse =
-  | { type: "result"; id: number; issues: ProofingResult["issues"] }
   | { type: "ready"; id: number }
   | { type: "cancelled"; id: number }
+  | { type: "result"; id: number; issues: ProofingResult["issues"] }
   | { type: "error"; id: number; message: string };
 
 type PendingRequest = {
@@ -20,16 +20,19 @@ type PendingRequest = {
 
 export type StudioProofingController = {
   provider: ProofingProvider;
-  preload: (language?: WritingLanguage) => Promise<void>;
+  preload: () => Promise<void>;
   setDefaultLanguage: (language: WritingLanguage) => void;
   setEnabled: (enabled: boolean) => void;
-  dispose: () => void;
+  setPersonalDictionary: (words: StudioSettings["personalDictionary"]) => void;
 };
 
-export function createStudioProofingProvider(initialLanguage: WritingLanguage): StudioProofingController {
+export function createSuperDocFrenchProofingProvider(
+  initialLanguage: WritingLanguage,
+): StudioProofingController {
   let worker: Worker | null = null;
-  let defaultLanguage = initialLanguage;
   let enabled = true;
+  let defaultLanguage = initialLanguage;
+  let personalWords: string[] = [];
   let nextRequestId = 0;
   const pending = new Map<number, PendingRequest>();
 
@@ -39,19 +42,6 @@ export function createStudioProofingProvider(initialLanguage: WritingLanguage): 
     pending.delete(id);
     request.removeAbortListener?.();
     return request;
-  };
-
-  const rejectAll = (message: string) => {
-    pending.forEach((request) => request.reject(new Error(message)));
-    pending.clear();
-  };
-
-  const cancelAll = () => {
-    pending.forEach((request) => {
-      request.removeAbortListener?.();
-      request.resolve({ issues: [] });
-    });
-    pending.clear();
   };
 
   const ensureWorker = () => {
@@ -66,15 +56,16 @@ export function createStudioProofingProvider(initialLanguage: WritingLanguage): 
       else request.resolve({ issues: message.type === "result" ? message.issues : [] });
     });
     worker.addEventListener("error", () => {
-      rejectAll("Le processus du correcteur orthographique s’est arrêté.");
+      pending.forEach((request) => request.reject(new Error("Le processus du dictionnaire français s’est arrêté.")));
+      pending.clear();
       worker?.terminate();
       worker = null;
     });
     return worker;
   };
 
-  const sendCheck = (request: ProofingRequest) => new Promise<ProofingResult>((resolve, reject) => {
-    if (!enabled || !request.segments.length) {
+  const check = (request: ProofingRequest) => new Promise<ProofingResult>((resolve, reject) => {
+    if (request.signal?.aborted || !enabled || !request.segments.length || !request.segments.some((segment) => isFrench(segment.language ?? defaultLanguage))) {
       resolve({ issues: [] });
       return;
     }
@@ -96,15 +87,16 @@ export function createStudioProofingProvider(initialLanguage: WritingLanguage): 
     activeWorker.postMessage({
       type: "check",
       id,
-      baseUrl: new URL("proofing/", document.baseURI).toString(),
+      baseUrl: proofingBaseUrl(),
       defaultLanguage,
-      maxSuggestions: Math.min(6, Math.max(1, request.maxSuggestions ?? 4)),
+      maxSuggestions: Math.min(5, Math.max(1, request.maxSuggestions ?? 4)),
+      personalWords,
       segments: request.segments,
     });
   });
 
   const provider: ProofingProvider = {
-    id: "enfer-fatal-local-spelling-worker",
+    id: "enfer-fatal-superdoc-french-proofing",
     getCapabilities: () => ({
       issueKinds: ["spelling"],
       supportsSuggestions: true,
@@ -112,32 +104,37 @@ export function createStudioProofingProvider(initialLanguage: WritingLanguage): 
       supportsBatching: true,
       requiresNetwork: false,
     }),
-    check: sendCheck,
+    check,
+    dispose: () => {
+      pending.forEach((request) => request.resolve({ issues: [] }));
+      pending.clear();
+      worker?.terminate();
+      worker = null;
+    },
   };
 
   return {
     provider,
-    preload: (language = defaultLanguage) => new Promise<void>((resolve, reject) => {
-      if (!enabled) {
+    preload: () => new Promise<void>((resolve, reject) => {
+      if (!enabled || !isFrench(defaultLanguage)) {
         resolve();
         return;
       }
       const activeWorker = ensureWorker();
       const id = ++nextRequestId;
       pending.set(id, { resolve: () => resolve(), reject });
-      activeWorker.postMessage({
-        type: "preload",
-        id,
-        baseUrl: new URL("proofing/", document.baseURI).toString(),
-        language,
-      });
+      activeWorker.postMessage({ type: "preload", id, baseUrl: proofingBaseUrl() });
     }),
     setDefaultLanguage: (language) => { defaultLanguage = language; },
     setEnabled: (value) => { enabled = value; },
-    dispose: () => {
-      cancelAll();
-      worker?.terminate();
-      worker = null;
-    },
+    setPersonalDictionary: (dictionary) => { personalWords = [...dictionary["fr-FR"]]; },
   };
+}
+
+function proofingBaseUrl() {
+  return new URL("proofing/", document.baseURI).toString();
+}
+
+function isFrench(language: string | null | undefined) {
+  return language?.toLocaleLowerCase("fr").split(/[-_]/u)[0] === "fr";
 }

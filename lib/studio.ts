@@ -259,7 +259,7 @@ export type StudioShortcuts = {
 };
 
 export type StudioSettings = {
-  schemaVersion: 8;
+  schemaVersion: 9;
   id: "studio-settings";
   revision: number;
   savedRevision: number;
@@ -279,6 +279,7 @@ export type StudioSettings = {
   customColors: string[];
   quoteStyle: QuoteStyle;
   writingCounters: Record<WritingCounterKey, boolean>;
+  personalDictionary: Record<WritingLanguage, string[]>;
   shortcuts: StudioShortcuts;
   characterShortcuts: CharacterShortcut[];
 };
@@ -344,7 +345,7 @@ export function createId(prefix: string) {
 
 export function createDefaultSettings(): StudioSettings {
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     id: "studio-settings",
     revision: 1,
     savedRevision: 1,
@@ -369,6 +370,13 @@ export function createDefaultSettings(): StudioSettings {
       pages: false,
       characters: false,
       symbols: true,
+    },
+    personalDictionary: {
+      "fr-FR": [],
+      "en-US": [],
+      "en-GB": [],
+      "es-ES": [],
+      "de-DE": [],
     },
     shortcuts: {
       save: "Ctrl+S",
@@ -445,6 +453,7 @@ export function normalizeSettings(value: unknown): StudioSettings {
       characters: input.writingCounters?.characters === true,
       symbols: input.writingCounters?.symbols !== false,
     },
+    personalDictionary: normalizePersonalDictionary(input.personalDictionary),
     shortcuts: {
       save: normalizeShortcut(input.shortcuts?.save, defaults.shortcuts.save),
       focus: normalizeShortcut(input.shortcuts?.focus, defaults.shortcuts.focus),
@@ -466,6 +475,25 @@ export function normalizeSettings(value: unknown): StudioSettings {
         })
       : [],
   };
+}
+
+function normalizePersonalDictionary(value: unknown): StudioSettings["personalDictionary"] {
+  const input = value && typeof value === "object"
+    ? value as Partial<Record<WritingLanguage, unknown>>
+    : {};
+  return Object.fromEntries(WRITING_LANGUAGES.map(({ value: language }) => {
+    const words = Array.isArray(input[language]) ? input[language] : [];
+    const seen = new Set<string>();
+    const normalized = words.flatMap((word) => {
+      if (typeof word !== "string") return [];
+      const trimmed = word.trim().normalize("NFC");
+      const key = trimmed.toLocaleLowerCase(language);
+      if (!trimmed || trimmed.length > 80 || !/^[\p{L}\p{M}]+$/u.test(trimmed) || seen.has(key)) return [];
+      seen.add(key);
+      return [trimmed];
+    }).slice(0, 500);
+    return [language, normalized];
+  })) as StudioSettings["personalDictionary"];
 }
 
 function normalizeSystemFonts(value: unknown): StudioSystemFont[] {

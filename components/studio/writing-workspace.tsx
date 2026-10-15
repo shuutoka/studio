@@ -272,6 +272,20 @@ export function WritingWorkspace({
     });
   }
 
+  function addPersonalDictionaryWord(language: WritingLanguage, word: string) {
+    updateSettings((draft) => {
+      const trimmed = word.trim().normalize("NFC");
+      if (!trimmed || draft.personalDictionary[language].some((item) => item.toLocaleLowerCase(language) === trimmed.toLocaleLowerCase(language))) return;
+      draft.personalDictionary[language].push(trimmed);
+    });
+  }
+
+  function removePersonalDictionaryWord(language: WritingLanguage, word: string) {
+    updateSettings((draft) => {
+      draft.personalDictionary[language] = draft.personalDictionary[language].filter((item) => item !== word);
+    });
+  }
+
   const activeVolumeId = activeVolume?.id ?? null;
 
   const addDrawing = useCallback((stroke: WritingDrawingStroke) => {
@@ -349,6 +363,8 @@ export function WritingWorkspace({
           onApplyFooter={applyVolumeFooter}
           onApplyLanguage={applyVolumeLanguage}
           onSpellcheckEnabledChange={updateVolumeSpellcheck}
+          onAddPersonalWord={addPersonalDictionaryWord}
+          onRemovePersonalWord={removePersonalDictionaryWord}
           commentsVisible={commentsVisible}
           onToggleComments={() => setCommentsVisible((current) => !current)}
           drawingEnabled={drawingEnabled}

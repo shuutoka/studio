@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import {
   Languages, LoaderCircle, MessageSquareText, Minus, Moon, PanelBottom, PencilLine,
   Sigma, SlidersHorizontal, Sun, Trash2, Undo2,
@@ -46,6 +46,8 @@ export function WritingDocumentControls({
   onApplyFooter,
   onApplyLanguage,
   onSpellcheckEnabledChange,
+  onAddPersonalWord,
+  onRemovePersonalWord,
   commentsVisible,
   onToggleComments,
   drawingEnabled,
@@ -66,6 +68,8 @@ export function WritingDocumentControls({
   onApplyFooter: (type: FooterType, text: string, format: FooterFormat) => Promise<void>;
   onApplyLanguage: (language: WritingLanguage, scope: "document" | "selection") => Promise<void>;
   onSpellcheckEnabledChange: (enabled: boolean) => void;
+  onAddPersonalWord: (language: WritingLanguage, word: string) => void;
+  onRemovePersonalWord: (language: WritingLanguage, word: string) => void;
   commentsVisible: boolean;
   onToggleComments: () => void;
   drawingEnabled: boolean;
@@ -87,6 +91,7 @@ export function WritingDocumentControls({
   const [applyingPageFormat, setApplyingPageFormat] = useState(false);
   const [language, setLanguage] = useState<WritingLanguage>(volume.documentLanguage);
   const [applyingLanguage, setApplyingLanguage] = useState<"document" | "selection" | null>(null);
+  const [personalWord, setPersonalWord] = useState("");
 
   useEffect(() => {
     // The local draft is intentionally reset when another volume is opened.
@@ -95,6 +100,7 @@ export function WritingDocumentControls({
     setFooterText(volume.footerText);
     setFooterFormat(footerFormatForType(volume.footerType, volume.footerFormat));
     setLanguage(volume.documentLanguage);
+    setPersonalWord("");
   }, [volume.documentLanguage, volume.footerFormat, volume.footerText, volume.footerType, volume.id]);
 
   const filteredCharacters = useMemo(() => Object.entries(specialCharacterGroups)
@@ -146,6 +152,18 @@ export function WritingDocumentControls({
     }
   }
 
+  function addPersonalWord(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const word = personalWord.trim();
+    if (!word) return;
+    if (!/^[\p{L}\p{M}]+$/u.test(word)) {
+      toast.error("Ajoutez un seul mot, sans espace ni ponctuation.");
+      return;
+    }
+    onAddPersonalWord(language, word);
+    setPersonalWord("");
+  }
+
   return (
     <div className="writing-document-controls flex min-h-10 items-center gap-2 overflow-x-auto border-t border-white/6 px-3 py-1.5 sm:px-5">
       <Select value={volume.status} onValueChange={(value: PageStatus) => onStatusChange(value)}>
@@ -184,7 +202,15 @@ export function WritingDocumentControls({
               <Button disabled={Boolean(applyingLanguage)} onClick={() => void applyLanguage("document")}>{applyingLanguage === "document" ? <LoaderCircle className="animate-spin" /> : <Languages />} Tout le volume</Button>
               <Button variant="outline" className="border-white/10 bg-transparent" disabled={Boolean(applyingLanguage)} onClick={() => void applyLanguage("selection")}>{applyingLanguage === "selection" ? <LoaderCircle className="animate-spin" /> : <Languages />} Sélection</Button>
             </div>
-            <p className="text-[11px] leading-4 text-[#77717f]">La correction et ses suggestions s’exécutent localement dans un processus séparé. Pour changer uniquement un passage, sélectionnez-le avant d’utiliser « Sélection ».</p>
+            <div className="rounded-lg border border-white/8 bg-black/15 p-3">
+              <p className="text-xs font-medium text-white">Dictionnaire personnel</p>
+              <form className="mt-2 flex gap-2" onSubmit={addPersonalWord}>
+                <Input value={personalWord} maxLength={80} placeholder="Nom ou mot à ignorer" aria-label="Mot à ajouter au dictionnaire personnel" className="h-8 border-white/10 bg-black/20 text-xs" onChange={(event) => setPersonalWord(event.target.value)} />
+                <Button size="sm" type="submit" disabled={!personalWord.trim()}>Ajouter</Button>
+              </form>
+              {settings.personalDictionary[language].length > 0 && <div className="mt-2 flex max-h-24 flex-wrap gap-1 overflow-y-auto">{settings.personalDictionary[language].map((word) => <button key={word.toLocaleLowerCase(language)} type="button" title={`Retirer ${word} du dictionnaire`} className="rounded-full border border-white/8 bg-white/4 px-2 py-1 text-[10px] text-[#bbb5c2] hover:border-[#ef6977]/40 hover:text-white" onClick={() => onRemovePersonalWord(language, word)}>{word} ×</button>)}</div>}
+            </div>
+            <p className="text-[11px] leading-4 text-[#77717f]">Le correcteur français fonctionne hors ligne. SuperDoc souligne les fautes et applique seul les propositions choisies par clic droit. Les autres langues restent enregistrées dans le DOCX mais ne sont pas encore corrigées.</p>
           </div>
         </PopoverContent>
       </Popover>
