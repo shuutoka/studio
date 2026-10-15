@@ -2,7 +2,13 @@ import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 
 import { DOCX_MIME } from "@/lib/writing-document";
 import { footerFormatForType, formatFooterText } from "@/lib/writing-footer";
-import { PAGE_FORMATS, type FooterFormat, type FooterType, type PageFormat } from "@/lib/studio";
+import {
+  PAGE_FORMATS,
+  type FooterFormat,
+  type FooterType,
+  type PageFormat,
+  type WritingLanguage,
+} from "@/lib/studio";
 
 const WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 const OFFICE_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -197,6 +203,42 @@ export async function applyDocxPageFormat(blob: Blob, pageFormat: PageFormat): P
     pageSize.removeAttributeNS(WORD_NS, "orient");
   }
   archive["word/document.xml"] = strToU8(serializeXml(documentXml));
+  return docxBlob(zipSync(archive, { level: 6 }));
+}
+
+export async function applyDocxLanguage(blob: Blob, language: WritingLanguage): Promise<Blob> {
+  const styledBlob = await ensureStudioDocxStyles(blob);
+  const archive = await readDocx(styledBlob);
+  const textPartPattern = /^word\/(?:document|header\d+|footer\d+|footnotes|endnotes|comments)\.xml$/u;
+
+  for (const [path, bytes] of Object.entries(archive)) {
+    if (!textPartPattern.test(path)) continue;
+    const xml = parseXml(strFromU8(bytes));
+    for (const run of elementsByLocalName(xml, "r")) setRunLanguage(xml, run, language);
+    archive[path] = strToU8(serializeXml(xml));
+  }
+
+  const stylesPath = "word/styles.xml";
+  const styles = archive[stylesPath]
+    ? parseXml(strFromU8(archive[stylesPath]))
+    : parseXml(studioStylesXml());
+  let defaults = directChild(styles.documentElement, "docDefaults");
+  if (!defaults) {
+    defaults = styles.createElementNS(WORD_NS, "w:docDefaults");
+    styles.documentElement.insertBefore(defaults, styles.documentElement.firstChild);
+  }
+  let runDefaults = directChild(defaults, "rPrDefault");
+  if (!runDefaults) {
+    runDefaults = styles.createElementNS(WORD_NS, "w:rPrDefault");
+    defaults.insertBefore(runDefaults, defaults.firstChild);
+  }
+  let runProperties = directChild(runDefaults, "rPr");
+  if (!runProperties) {
+    runProperties = styles.createElementNS(WORD_NS, "w:rPr");
+    runDefaults.append(runProperties);
+  }
+  setLanguageProperty(styles, runProperties, language);
+  archive[stylesPath] = strToU8(serializeXml(styles));
   return docxBlob(zipSync(archive, { level: 6 }));
 }
 
@@ -512,6 +554,24 @@ function removeRetiredQuickFormatStyle(style: Element) {
   if (!quickFormat) return false;
   quickFormat.remove();
   return true;
+}
+
+function setRunLanguage(xml: XMLDocument, run: Element, language: WritingLanguage) {
+  let runProperties = directChild(run, "rPr");
+  if (!runProperties) {
+    runProperties = xml.createElementNS(WORD_NS, "w:rPr");
+    run.insertBefore(runProperties, run.firstChild);
+  }
+  setLanguageProperty(xml, runProperties, language);
+}
+
+function setLanguageProperty(xml: XMLDocument, runProperties: Element, language: WritingLanguage) {
+  let languageProperty = directChild(runProperties, "lang");
+  if (!languageProperty) {
+    languageProperty = xml.createElementNS(WORD_NS, "w:lang");
+    runProperties.append(languageProperty);
+  }
+  languageProperty.setAttributeNS(WORD_NS, "w:val", language);
 }
 
 function docxParagraphText(paragraph: Element) {

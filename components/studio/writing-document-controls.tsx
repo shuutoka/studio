@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import {
-  LoaderCircle, MessageSquareText, Minus, Moon, PanelBottom, PencilLine,
+  Languages, LoaderCircle, MessageSquareText, Minus, Moon, PanelBottom, PencilLine,
   Sigma, SlidersHorizontal, Sun, Trash2, Undo2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -11,11 +11,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { DATE_FOOTER_FORMATS, footerFormatForType, formatFooterText, PAGE_FOOTER_FORMATS } from "@/lib/writing-footer";
 import {
   PAGE_FORMATS,
   type FooterFormat, type FooterType, type PageFormat, type PageStatus,
-  type StudioSettings, type StudioVolume,
+  type StudioSettings, type StudioVolume, type WritingLanguage, WRITING_LANGUAGES,
 } from "@/lib/studio";
 
 const specialCharacterGroups = {
@@ -43,6 +44,10 @@ export function WritingDocumentControls({
   onPaperModeChange,
   onInsert,
   onApplyFooter,
+  onApplyLanguage,
+  onSpellcheckEnabledChange,
+  onAddPersonalWord,
+  onRemovePersonalWord,
   commentsVisible,
   onToggleComments,
   drawingEnabled,
@@ -61,6 +66,10 @@ export function WritingDocumentControls({
   onPaperModeChange: (mode: "light" | "dark") => void;
   onInsert: (text: string) => boolean;
   onApplyFooter: (type: FooterType, text: string, format: FooterFormat) => Promise<void>;
+  onApplyLanguage: (language: WritingLanguage, scope: "document" | "selection") => Promise<void>;
+  onSpellcheckEnabledChange: (enabled: boolean) => void;
+  onAddPersonalWord: (language: WritingLanguage, word: string) => void;
+  onRemovePersonalWord: (language: WritingLanguage, word: string) => void;
   commentsVisible: boolean;
   onToggleComments: () => void;
   drawingEnabled: boolean;
@@ -80,6 +89,9 @@ export function WritingDocumentControls({
   const [applyingFooter, setApplyingFooter] = useState(false);
   const [characterQuery, setCharacterQuery] = useState("");
   const [applyingPageFormat, setApplyingPageFormat] = useState(false);
+  const [language, setLanguage] = useState<WritingLanguage>(volume.documentLanguage);
+  const [applyingLanguage, setApplyingLanguage] = useState<"document" | "selection" | null>(null);
+  const [personalWord, setPersonalWord] = useState("");
 
   useEffect(() => {
     // The local draft is intentionally reset when another volume is opened.
@@ -87,7 +99,9 @@ export function WritingDocumentControls({
     setFooterType(volume.footerType);
     setFooterText(volume.footerText);
     setFooterFormat(footerFormatForType(volume.footerType, volume.footerFormat));
-  }, [volume.footerFormat, volume.footerText, volume.footerType, volume.id]);
+    setLanguage(volume.documentLanguage);
+    setPersonalWord("");
+  }, [volume.documentLanguage, volume.footerFormat, volume.footerText, volume.footerType, volume.id]);
 
   const filteredCharacters = useMemo(() => Object.entries(specialCharacterGroups)
     .map(([group, characters]) => ({
@@ -124,6 +138,32 @@ export function WritingDocumentControls({
     }
   }
 
+  async function applyLanguage(scope: "document" | "selection") {
+    setApplyingLanguage(scope);
+    try {
+      await onApplyLanguage(language, scope);
+      toast.success(scope === "document"
+        ? "Langue appliquée à tout le volume."
+        : "Langue appliquée au passage sélectionné.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "La langue n’a pas pu être appliquée.");
+    } finally {
+      setApplyingLanguage(null);
+    }
+  }
+
+  function addPersonalWord(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const word = personalWord.trim();
+    if (!word) return;
+    if (!/^[\p{L}\p{M}]+$/u.test(word)) {
+      toast.error("Ajoutez un seul mot, sans espace ni ponctuation.");
+      return;
+    }
+    onAddPersonalWord(language, word);
+    setPersonalWord("");
+  }
+
   return (
     <div className="writing-document-controls flex min-h-10 items-center gap-2 overflow-x-auto border-t border-white/6 px-3 py-1.5 sm:px-5">
       <Select value={volume.status} onValueChange={(value: PageStatus) => onStatusChange(value)}>
@@ -142,6 +182,38 @@ export function WritingDocumentControls({
         <Button aria-label="Feuille claire" title="Feuille claire" aria-pressed={settings.paperColorMode === "light"} size="icon-xs" variant={settings.paperColorMode === "light" ? "default" : "ghost"} className={settings.paperColorMode === "light" ? "bg-[#ef4f5f] text-white" : ""} onClick={() => onPaperModeChange("light")}><Sun /></Button>
         <Button aria-label="Feuille sombre" title="Feuille sombre" aria-pressed={settings.paperColorMode === "dark"} size="icon-xs" variant={settings.paperColorMode === "dark" ? "default" : "ghost"} className={settings.paperColorMode === "dark" ? "bg-[#ef4f5f] text-white" : ""} onClick={() => onPaperModeChange("dark")}><Moon /></Button>
       </div>
+
+      <Popover>
+        <PopoverTrigger asChild><Button size="sm" variant="outline" className="shrink-0 border-white/10 bg-transparent text-xs"><Languages /> Langue</Button></PopoverTrigger>
+        <PopoverContent align="start" className="w-80 border-white/10 bg-[#1b1821] text-[#eeeaf2]">
+          <PopoverHeader className="mb-4"><PopoverTitle>Correction orthographique</PopoverTitle></PopoverHeader>
+          <div className="grid gap-3">
+            <div className="flex items-center justify-between gap-4 rounded-lg border border-white/8 bg-black/15 p-3">
+              <div><p className="text-xs font-medium text-white">Correction automatique</p><p className="mt-0.5 text-[11px] leading-4 text-[#77717f]">Soulignement et suggestions pour ce volume.</p></div>
+              <Switch checked={volume.spellcheckEnabled} onCheckedChange={onSpellcheckEnabledChange} aria-label="Activer la correction orthographique" />
+            </div>
+            <label className="grid gap-1.5 text-xs text-[#aaa4b4]">Langue
+              <Select value={language} onValueChange={(value: WritingLanguage) => setLanguage(value)}>
+                <SelectTrigger className="w-full border-white/10 bg-black/20"><SelectValue /></SelectTrigger>
+                <SelectContent>{WRITING_LANGUAGES.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent>
+              </Select>
+            </label>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Button disabled={Boolean(applyingLanguage)} onClick={() => void applyLanguage("document")}>{applyingLanguage === "document" ? <LoaderCircle className="animate-spin" /> : <Languages />} Tout le volume</Button>
+              <Button variant="outline" className="border-white/10 bg-transparent" disabled={Boolean(applyingLanguage)} onClick={() => void applyLanguage("selection")}>{applyingLanguage === "selection" ? <LoaderCircle className="animate-spin" /> : <Languages />} Sélection</Button>
+            </div>
+            <div className="rounded-lg border border-white/8 bg-black/15 p-3">
+              <p className="text-xs font-medium text-white">Dictionnaire personnel</p>
+              <form className="mt-2 flex gap-2" onSubmit={addPersonalWord}>
+                <Input value={personalWord} maxLength={80} placeholder="Nom ou mot à ignorer" aria-label="Mot à ajouter au dictionnaire personnel" className="h-8 border-white/10 bg-black/20 text-xs" onChange={(event) => setPersonalWord(event.target.value)} />
+                <Button size="sm" type="submit" disabled={!personalWord.trim()}>Ajouter</Button>
+              </form>
+              {settings.personalDictionary[language].length > 0 && <div className="mt-2 flex max-h-24 flex-wrap gap-1 overflow-y-auto">{settings.personalDictionary[language].map((word) => <button key={word.toLocaleLowerCase(language)} type="button" title={`Retirer ${word} du dictionnaire`} className="rounded-full border border-white/8 bg-white/4 px-2 py-1 text-[10px] text-[#bbb5c2] hover:border-[#ef6977]/40 hover:text-white" onClick={() => onRemovePersonalWord(language, word)}>{word} ×</button>)}</div>}
+            </div>
+            <p className="text-[11px] leading-4 text-[#77717f]">Le correcteur français fonctionne hors ligne. SuperDoc souligne les fautes et applique seul les propositions choisies par clic droit. Les autres langues restent enregistrées dans le DOCX mais ne sont pas encore corrigées.</p>
+          </div>
+        </PopoverContent>
+      </Popover>
 
       <Popover>
         <PopoverTrigger asChild><Button size="sm" variant="outline" className="shrink-0 border-white/10 bg-transparent text-xs"><PanelBottom /> Pied de page</Button></PopoverTrigger>

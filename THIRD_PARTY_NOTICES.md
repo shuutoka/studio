@@ -17,3 +17,16 @@ relèvent de l’AGPL-3.0, dont le texte intégral figure dans `LICENSE`. Cela i
 notamment l’accès au code source correspondant de la version proposée aux
 utilisateurs du site. Une distribution propriétaire nécessite une licence
 commerciale distincte auprès de SuperDoc.
+
+## Typo.js et dictionnaire Hunspell français
+
+La correction orthographique locale utilise **Typo.js**, conformément au modèle
+de fournisseur `proofing` documenté par SuperDoc, et le dictionnaire français
+du projet `wooorm/dictionaries`. Les fichiers `.aff` et `.dic` sont copiés dans
+le site statique pendant la compilation et restent exécutés uniquement dans le navigateur.
+
+- Typo.js : licence BSD-3-Clause ;
+- dictionnaire français : licence MPL-2.0.
+
+Les textes de licence correspondants sont publiés avec les dictionnaires dans
+le dossier `proofing` du site généré.

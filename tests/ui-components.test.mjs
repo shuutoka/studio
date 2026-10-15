@@ -21,6 +21,33 @@ after(async () => {
   await vite.close();
 });
 
+const proofingMisspellings = new Map([
+  ["ascenceur", "ascenseur"],
+  ["bonjor", "bonjour"],
+]);
+
+async function analyzeProofingText(text, id = "segment-test") {
+  const { analyzeFrenchProofingSegment } = await vite.ssrLoadModule("/lib/writing-proofing-analyzer.ts");
+  return analyzeFrenchProofingSegment({ id, text, language: "fr-FR" }, {
+    dictionary: {
+      check: (_word, normalizedWord) => !proofingMisspellings.has(normalizedWord),
+      suggest: (_word, normalizedWord) => {
+        const replacement = proofingMisspellings.get(normalizedWord);
+        return replacement ? [` ${replacement}`, replacement, `${replacement} `, replacement] : [];
+      },
+    },
+    personalWords: new Set(),
+    maxSuggestions: 4,
+    budget: { remainingIssues: 60, remainingSuggestionLookups: 4 },
+  });
+}
+
+function applyProofingIssue(text, issue, replacement) {
+  assert.equal(text.slice(issue.start, issue.end), issue.message.match(/« (.*) »/)?.[1]);
+  assert.doesNotMatch(replacement, /\s/u);
+  return text.slice(0, issue.start) + replacement + text.slice(issue.end);
+}
+
 test("forwards progress semantics to the primitive", async () => {
   const { Progress } = await vite.ssrLoadModule("/components/ui/progress.tsx");
   const html = renderToStaticMarkup(React.createElement(Progress, { value: 37 }));
@@ -204,7 +231,7 @@ test("creates and migrates persistent story boards", async () => {
   project.boards[0].folderId = "folder-timeline";
 
   const normalized = normalizeProject(project);
-  assert.equal(normalized.schemaVersion, 11);
+  assert.equal(normalized.schemaVersion, 13);
   assert.equal(normalized.boards[0].name, "Ligne temporelle");
   assert.equal(normalized.boards[0].nodes.length, 2);
   assert.equal(normalized.boards[0].edges[0].label, "Puis");
@@ -257,7 +284,7 @@ test("ships the Pansement writing, feedback and image-link fixes", async () => {
 
   assert.deepEqual([PAGE_FORMATS.a4.width, PAGE_FORMATS.a4.height], [794, 1123]);
   const settings = createDefaultSettings();
-  assert.equal(normalizeSettings(settings).schemaVersion, 8);
+  assert.equal(normalizeSettings(settings).schemaVersion, 9);
   assert.match(writingImport, /background-color/);
   assert.match(writingImport, /removeImportedFormatting/);
   assert.match(importButton, /Supprimer la mise en forme/);
@@ -287,7 +314,7 @@ test("renders the legal notice and requires feedback privacy consent", async () 
   assert.match(app, /globalView === "legal"/);
   assert.match(settingsView, /privacyAccepted/);
   assert.match(settingsView, /J’accepte que les informations saisies/);
-  assert.match(serviceWorker, /enfer-fatal-studio-drawing-export-fix/);
+  assert.match(serviceWorker, /enfer-fatal-studio-superdoc-proofing-ranges/);
 });
 
 test("ships the native SuperDoc writing workspace and embeds documents in EFS backups", async () => {
@@ -297,14 +324,14 @@ test("ships the native SuperDoc writing workspace and embeds documents in EFS ba
   const writingDocument = await readFile(path.join(root, "lib/writing-document.ts"), "utf8");
   const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
 
-  assert.equal(packageJson.dependencies["@superdoc/react"], "^2.8.0");
+  assert.equal(packageJson.dependencies["@superdoc/react"], "^2.18.0");
   assert.match(workspace, /SuperDocWritingEditor/);
   assert.doesNotMatch(workspace, /<RichTextEditor/);
   assert.match(superdocEditor, /excludeItems/);
   assert.match(superdocEditor, /"ai"/);
   assert.match(superdocEditor, /persistWritingDocument/);
   assert.match(writingDocument, /writing-docx/);
-  assert.match(projectFile, /formatVersion:\s*11/);
+  assert.match(projectFile, /formatVersion:\s*14/);
 });
 
 test("keeps SuperDoc inside the Studio viewport without continuous fit-width feedback", async () => {
@@ -349,9 +376,11 @@ test("reconnects Writing 2.1 to Studio preferences and native DOCX metadata", as
 
   const settings = normalizeSettings({ ...createDefaultSettings(), schemaVersion: 1 });
   const project = normalizeProject({ ...createBlankProject("Migration 2.1", "novel"), schemaVersion: 7 });
-  assert.equal(settings.schemaVersion, 8);
+  assert.equal(settings.schemaVersion, 9);
+  assert.deepEqual(settings.personalDictionary["fr-FR"], []);
   assert.equal(settings.writingTheme, "follow");
-  assert.equal(project.schemaVersion, 11);
+  assert.equal(project.schemaVersion, 13);
+  assert.equal(project.volumes[0].documentLanguage, "fr-FR");
   assert.equal(project.volumes[0].status, "draft");
   assert.equal(project.volumes[0].footerFormat, "page-of-total");
   assert.deepEqual(project.volumes[0].documentOutline, []);
@@ -423,7 +452,7 @@ test("adds review drawings, anchored comments and per-volume paper formats witho
   project.volumes[0].pageFormat = "a5";
   project.volumes[0].documentDrawings = [{ id: "trait-1", pageIndex: 0, anchorBlockId: "A1B2C3D4", anchorParagraphIndex: 0, color: "#ef4f5f", size: 4, points: [{ x: 0.1, y: 0.2 }, { x: 0.2, y: 0.3 }] }];
   const normalized = normalizeProject(project);
-  assert.equal(normalized.schemaVersion, 11);
+  assert.equal(normalized.schemaVersion, 13);
   assert.equal(normalized.volumes[0].pageFormat, "a5");
   assert.equal(normalized.volumes[0].documentDrawings.length, 1);
   assert.equal(normalized.volumes[0].documentDrawings[0].anchorBlockId, "A1B2C3D4");
@@ -448,6 +477,174 @@ test("adds review drawings, anchored comments and per-volume paper formats witho
   assert.match(drawingExport, /anchorParagraphIndex/);
   assert.doesNotMatch(drawingExport, /Ouvrez ce volume/);
   assert.match(css, /touch-action: pan-y/);
+});
+
+test("uses native SuperDoc proofing with a read-only local French provider", async () => {
+  const { createBlankProject, createDefaultSettings, normalizeProject, normalizeSettings, WRITING_LANGUAGES } = await vite.ssrLoadModule("/lib/studio.ts");
+  const project = createBlankProject("Langues", "novel");
+  delete project.volumes[0].documentLanguage;
+  delete project.volumes[0].spellcheckEnabled;
+  const normalized = normalizeProject(project);
+  assert.equal(normalized.schemaVersion, 13);
+  assert.equal(normalized.volumes[0].documentLanguage, "fr-FR");
+  assert.equal(normalized.volumes[0].spellcheckEnabled, true);
+  assert.equal(WRITING_LANGUAGES.length, 5);
+  const legacySettings = createDefaultSettings();
+  legacySettings.personalDictionary = { "fr-FR": ["Aurélien", "aurélien", "deux mots"], "en-US": [], "en-GB": [], "es-ES": [], "de-DE": [] };
+  const normalizedSettings = normalizeSettings(legacySettings);
+  assert.deepEqual(normalizedSettings.personalDictionary["fr-FR"], ["Aurélien"]);
+
+  const app = await readFile(path.join(root, "components/studio/studio-app-v3.tsx"), "utf8");
+  const dashboard = await readFile(path.join(root, "components/studio/studio-app.tsx"), "utf8");
+  const workspace = await readFile(path.join(root, "components/studio/writing-workspace.tsx"), "utf8");
+  const controls = await readFile(path.join(root, "components/studio/writing-document-controls.tsx"), "utf8");
+  const editor = await readFile(path.join(root, "components/studio/superdoc-writing-editor.tsx"), "utf8");
+  const proofing = await readFile(path.join(root, "lib/writing-proofing.ts"), "utf8");
+  const proofingWorker = await readFile(path.join(root, "lib/writing-proofing.worker.ts"), "utf8");
+  const docx = await readFile(path.join(root, "lib/writing-docx.ts"), "utf8");
+  const css = await readFile(path.join(root, "app/globals.css"), "utf8");
+  const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+
+  assert.match(app, /settingsDialogOpen/);
+  assert.match(app, /Modifier les préférences sans quitter l’espace d’écriture/);
+  assert.match(dashboard, /Bannière de \$\{project\.name\}/);
+  assert.match(dashboard, /Modifier le projet/);
+  assert.match(workspace, /onOpenSettings/);
+  assert.match(controls, /Correction orthographique/);
+  assert.match(controls, /Correction automatique/);
+  assert.match(controls, /Tout le volume/);
+  assert.match(controls, /Sélection/);
+  assert.match(controls, /Dictionnaire personnel/);
+  assert.match(proofing, /enfer-fatal-superdoc-french-proofing/);
+  assert.match(proofing, /requiresNetwork: false/);
+  assert.match(proofingWorker, /analyzeFrenchProofingSegment/);
+  assert.match(proofingWorker, /dictionary\.suggest/);
+  assert.match(proofing, /setDefaultLanguage/);
+  assert.match(proofing, /new Worker/);
+  assert.doesNotMatch(`${proofing}\n${proofingWorker}`, /replaceFile|innerHTML|outerHTML|textContent|activeEditor|querySelector/);
+  assert.match(editor, /allowIgnoreWord: true/);
+  assert.match(editor, /proofing=\{proofingConfig\}/);
+  assert.equal(packageJson.dependencies["@superdoc/react"], "^2.18.0");
+  assert.equal(packageJson.dependencies.superdoc, "^2.23.0");
+  assert.equal(packageJson.dependencies["typo-js"], "^1.4.0");
+  assert.equal(packageJson.dependencies.nspell, undefined);
+  assert.match(dashboard, /Pages écrites \/ objectif/);
+  assert.match(dashboard, /\$\{stats\.pages\} \/ \$\{project\.targetPages/);
+  assert.match(docx, /applyDocxLanguage/);
+  assert.match(editor, /attachDrawingShield/);
+  assert.match(editor, /virtualKeyboard/);
+  assert.match(css, /efs-drawing-shield/);
+  assert.match(css, /\[data-slot="select-content"\]/);
+});
+
+test("proofing replaces ascenceur without touching its surrounding spaces", async () => {
+  const initial = "Après un ascenceur émotionnel";
+  const [issue] = await analyzeProofingText(initial);
+
+  assert.deepEqual(
+    { start: issue.start, end: issue.end, replacements: issue.replacements },
+    { start: 9, end: 18, replacements: ["ascenseur"] },
+  );
+  assert.equal(applyProofingIssue(initial, issue, issue.replacements[0]), "Après un ascenseur émotionnel");
+});
+
+test("proofing keeps an exact range when the misspelling starts the segment", async () => {
+  const initial = "ascenceur émotionnel";
+  const [issue] = await analyzeProofingText(initial);
+
+  assert.deepEqual([issue.start, issue.end], [0, 9]);
+  assert.equal(applyProofingIssue(initial, issue, "ascenseur"), "ascenseur émotionnel");
+});
+
+test("proofing keeps an exact range when the misspelling ends the segment", async () => {
+  const initial = "un ascenceur";
+  const [issue] = await analyzeProofingText(initial);
+
+  assert.deepEqual([issue.start, issue.end], [3, 12]);
+  assert.equal(applyProofingIssue(initial, issue, "ascenseur"), "un ascenseur");
+});
+
+test("proofing reports only the bold word and leaves its formatting model unchanged", async () => {
+  const runs = [
+    { text: "un ", bold: false, italic: false, font: "Arial" },
+    { text: "ascenceur", bold: true, italic: false, font: "Georgia" },
+    { text: " émotionnel", bold: false, italic: true, font: "Arial" },
+  ];
+  const beforeAnalysis = structuredClone(runs);
+  const text = runs.map((run) => run.text).join("");
+  const [issue] = await analyzeProofingText(text);
+
+  assert.deepEqual(runs, beforeAnalysis);
+  assert.deepEqual([issue.start, issue.end], [runs[0].text.length, runs[0].text.length + runs[1].text.length]);
+  const correctedRuns = structuredClone(runs);
+  correctedRuns[1].text = applyProofingIssue(runs[1].text, { ...issue, start: 0, end: runs[1].text.length }, "ascenseur");
+  assert.deepEqual(
+    { bold: correctedRuns[1].bold, italic: correctedRuns[1].italic, font: correctedRuns[1].font },
+    { bold: true, italic: false, font: "Georgia" },
+  );
+  assert.equal(`un **${correctedRuns[1].text}** émotionnel`, "un **ascenseur** émotionnel");
+});
+
+test("proofing recalculates the second range after correcting a first misspelling", async () => {
+  let text = "bonjor puis ascenceur";
+  let issues = await analyzeProofingText(text);
+  assert.deepEqual(issues.map(({ start, end }) => [start, end]), [[0, 6], [12, 21]]);
+
+  text = applyProofingIssue(text, issues[0], "bonjour");
+  issues = await analyzeProofingText(text);
+  const secondIssue = issues.find((issue) => text.slice(issue.start, issue.end) === "ascenceur");
+  assert.ok(secondIssue);
+  assert.deepEqual([secondIssue.start, secondIssue.end], [13, 22]);
+  text = applyProofingIssue(text, secondIssue, "ascenseur");
+  assert.equal(text, "bonjour puis ascenseur");
+});
+
+test("proofing uses UTF-16 offsets after accented text and surrogate pairs", async () => {
+  for (const initial of ["Élève ascenceur", "🙂 ascenceur"]) {
+    const [issue] = await analyzeProofingText(initial);
+    const expectedStart = initial.indexOf("ascenceur");
+    assert.deepEqual([issue.start, issue.end], [expectedStart, expectedStart + "ascenceur".length]);
+    assert.equal(applyProofingIssue(initial, issue, "ascenseur"), initial.replace("ascenceur", "ascenseur"));
+  }
+});
+
+test("proofing corrects exact ranges at both paragraph boundaries", async () => {
+  const initial = "ascenceur au milieu puis ascenceur";
+  const issues = await analyzeProofingText(initial);
+
+  assert.deepEqual([issues[0].start, issues[0].end], [0, 9]);
+  assert.deepEqual([issues[1].start, issues[1].end], [initial.length - 9, initial.length]);
+  let corrected = applyProofingIssue(initial, issues[1], "ascenseur");
+  corrected = applyProofingIssue(corrected, issues[0], "ascenseur");
+  assert.equal(corrected, "ascenseur au milieu puis ascenseur");
+});
+
+test("the local French dictionary returns a targeted suggestion", async () => {
+  const { default: Typo } = await import("typo-js");
+  const { analyzeFrenchProofingSegment } = await vite.ssrLoadModule("/lib/writing-proofing-analyzer.ts");
+  const affData = await readFile(path.join(root, "public/proofing/fr.aff"), "utf8");
+  const wordsData = await readFile(path.join(root, "public/proofing/fr.dic"), "utf8");
+  const dictionary = new Typo("fr_FR", affData, wordsData);
+  assert.equal(dictionary.check("bonjour"), true);
+  assert.equal(dictionary.check("bonjor"), false);
+  assert.ok(dictionary.suggest("bonjor", 4).includes("bonjour"));
+
+  const [issue] = analyzeFrenchProofingSegment({
+    id: "segment-real-dictionary",
+    text: "Après un ascenceur émotionnel",
+    language: "fr-FR",
+  }, {
+    dictionary: {
+      check: (word) => dictionary.check(word),
+      suggest: (word, _normalizedWord, limit) => dictionary.suggest(word, limit),
+    },
+    personalWords: new Set(),
+    maxSuggestions: 6,
+    budget: { remainingIssues: 60, remainingSuggestionLookups: 4 },
+  });
+  assert.deepEqual([issue.start, issue.end], [9, 18]);
+  assert.ok(issue.replacements.includes("ascenseur"));
+  assert.ok(issue.replacements.every((replacement) => !/\s/u.test(replacement)));
 });
 
 test("formats page numbers and dates for the native footer", async () => {
@@ -480,6 +677,32 @@ test("applies a selected paper format to every DOCX section", async () => {
     const result = strFromU8(archive["word/document.xml"]);
     assert.match(result, /w:w="8385"/);
     assert.match(result, /w:h="11910"/);
+  } finally {
+    if (previousDOMParser) globalThis.DOMParser = previousDOMParser;
+    else delete globalThis.DOMParser;
+    if (previousXMLSerializer) globalThis.XMLSerializer = previousXMLSerializer;
+    else delete globalThis.XMLSerializer;
+    dom.window.close();
+  }
+});
+
+test("stores a document language in DOCX runs and defaults", async () => {
+  const { JSDOM } = await import("jsdom");
+  const { strFromU8, strToU8, unzipSync, zipSync } = await import("fflate");
+  const { applyDocxLanguage } = await vite.ssrLoadModule("/lib/writing-docx.ts");
+  const dom = new JSDOM();
+  const previousDOMParser = globalThis.DOMParser;
+  const previousXMLSerializer = globalThis.XMLSerializer;
+  globalThis.DOMParser = dom.window.DOMParser;
+  globalThis.XMLSerializer = dom.window.XMLSerializer;
+
+  try {
+    const xml = `<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Hello</w:t></w:r></w:p><w:sectPr/></w:body></w:document>`;
+    const bytes = zipSync({ "word/document.xml": strToU8(xml) });
+    const updated = await applyDocxLanguage(new Blob([bytes]), "en-GB");
+    const archive = unzipSync(new Uint8Array(await updated.arrayBuffer()));
+    assert.match(strFromU8(archive["word/document.xml"]), /w:lang w:val="en-GB"/);
+    assert.match(strFromU8(archive["word/styles.xml"]), /w:lang w:val="en-GB"/);
   } finally {
     if (previousDOMParser) globalThis.DOMParser = previousDOMParser;
     else delete globalThis.DOMParser;

@@ -34,6 +34,9 @@ globale `.efs` ou `.zip`.
 - cartes projet personnalisables par couleur et bannière ;
 - mode focus pour l’écriture et navigation par styles de titres ;
 - relecture avec commentaires ancrés et dessin libre tactile/souris, intégré au DOCX exporté ;
+- correction orthographique française locale via l’interface native de SuperDoc : soulignement, propositions au clic droit, action Ignorer et dictionnaire personnel ;
+- accès aux paramètres dans une fenêtre depuis l’espace d’écriture ;
+- bannière visible et modifiable directement dans le tableau de bord du projet ;
 - mise à l’échelle automatique des feuilles sur smartphone ;
 - enregistrement automatique du DOCX dans IndexedDB ;
 - export fidèle en DOCX, impression/PDF depuis le volume ouvert et export TXT ;
@@ -70,6 +73,14 @@ distribuée sous la même licence AGPL-3.0. Le dépôt public et le code source
 correspondant à la version proposée sur le site doivent rester accessibles.
 Consultez `LICENSE` et `THIRD_PARTY_NOTICES.md` ; une utilisation propriétaire
 du moteur nécessite une licence commerciale distincte auprès de SuperDoc.
+Le fournisseur de correction utilise `Typo.js` et un dictionnaire Hunspell
+français copié localement pendant le build. Il analyse uniquement les segments
+transmis par SuperDoc et renvoie leurs positions UTF-16 exactes, avec une borne
+de fin exclusive. Les propositions contenant un espace ou de la ponctuation
+sont refusées. SuperDoc reste seul responsable du soulignement et de
+l’application d’une proposition. Le
+calcul du dictionnaire est isolé dans un processus Web sans accès à l’éditeur ;
+aucun passage du manuscrit n’est envoyé à un service externe.
 
 ## Publier sur GitHub Pages
 

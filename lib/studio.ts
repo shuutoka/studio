@@ -109,6 +109,10 @@ export type StudioVolume = {
   footerType: FooterType;
   footerText: string;
   footerFormat: FooterFormat;
+  /** Language used by the local spell checker and stored in the DOCX. */
+  documentLanguage: WritingLanguage;
+  /** Allows demanding documents to disable local proofing without changing their language. */
+  spellcheckEnabled: boolean;
   chapters: StudioChapter[];
   /**
    * SuperDoc keeps the canonical document as a DOCX blob in IndexedDB. These
@@ -255,7 +259,7 @@ export type StudioShortcuts = {
 };
 
 export type StudioSettings = {
-  schemaVersion: 8;
+  schemaVersion: 9;
   id: "studio-settings";
   revision: number;
   savedRevision: number;
@@ -275,12 +279,13 @@ export type StudioSettings = {
   customColors: string[];
   quoteStyle: QuoteStyle;
   writingCounters: Record<WritingCounterKey, boolean>;
+  personalDictionary: Record<WritingLanguage, string[]>;
   shortcuts: StudioShortcuts;
   characterShortcuts: CharacterShortcut[];
 };
 
 export type StudioProject = {
-  schemaVersion: 11;
+  schemaVersion: 13;
   id: string;
   name: string;
   description: string;
@@ -308,6 +313,16 @@ export type StudioProject = {
 
 export type WritingDocumentStats = Record<WritingCounterKey, number>;
 
+export type WritingLanguage = "fr-FR" | "en-US" | "en-GB" | "es-ES" | "de-DE";
+
+export const WRITING_LANGUAGES: ReadonlyArray<{ value: WritingLanguage; label: string }> = [
+  { value: "fr-FR", label: "Français (France)" },
+  { value: "en-US", label: "Anglais (États-Unis)" },
+  { value: "en-GB", label: "Anglais (Royaume-Uni)" },
+  { value: "es-ES", label: "Espagnol" },
+  { value: "de-DE", label: "Allemand" },
+];
+
 export type ProjectStats = {
   volumes: number;
   chapters: number;
@@ -330,7 +345,7 @@ export function createId(prefix: string) {
 
 export function createDefaultSettings(): StudioSettings {
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     id: "studio-settings",
     revision: 1,
     savedRevision: 1,
@@ -355,6 +370,13 @@ export function createDefaultSettings(): StudioSettings {
       pages: false,
       characters: false,
       symbols: true,
+    },
+    personalDictionary: {
+      "fr-FR": [],
+      "en-US": [],
+      "en-GB": [],
+      "es-ES": [],
+      "de-DE": [],
     },
     shortcuts: {
       save: "Ctrl+S",
@@ -431,6 +453,7 @@ export function normalizeSettings(value: unknown): StudioSettings {
       characters: input.writingCounters?.characters === true,
       symbols: input.writingCounters?.symbols !== false,
     },
+    personalDictionary: normalizePersonalDictionary(input.personalDictionary),
     shortcuts: {
       save: normalizeShortcut(input.shortcuts?.save, defaults.shortcuts.save),
       focus: normalizeShortcut(input.shortcuts?.focus, defaults.shortcuts.focus),
@@ -452,6 +475,25 @@ export function normalizeSettings(value: unknown): StudioSettings {
         })
       : [],
   };
+}
+
+function normalizePersonalDictionary(value: unknown): StudioSettings["personalDictionary"] {
+  const input = value && typeof value === "object"
+    ? value as Partial<Record<WritingLanguage, unknown>>
+    : {};
+  return Object.fromEntries(WRITING_LANGUAGES.map(({ value: language }) => {
+    const words = Array.isArray(input[language]) ? input[language] : [];
+    const seen = new Set<string>();
+    const normalized = words.flatMap((word) => {
+      if (typeof word !== "string") return [];
+      const trimmed = word.trim().normalize("NFC");
+      const key = trimmed.toLocaleLowerCase(language);
+      if (!trimmed || trimmed.length > 80 || !/^[\p{L}\p{M}]+$/u.test(trimmed) || seen.has(key)) return [];
+      seen.add(key);
+      return [trimmed];
+    }).slice(0, 500);
+    return [language, normalized];
+  })) as StudioSettings["personalDictionary"];
 }
 
 function normalizeSystemFonts(value: unknown): StudioSystemFont[] {
@@ -532,6 +574,8 @@ export function createEmptyVolume(index = 1, title = `Volume ${index}`, pageForm
     footerType: "none",
     footerText: "",
     footerFormat: "page-of-total",
+    documentLanguage: "fr-FR",
+    spellcheckEnabled: true,
     chapters: [{ id: createId("chapter"), title: "Contenu", pages: [createEmptyPage()] }],
     documentEngine: "superdoc",
     documentText: "",
@@ -631,7 +675,7 @@ export function getProjectStats(project: StudioProject): ProjectStats {
 export function createBlankProject(name: string, projectType: ProjectType = "manga"): StudioProject {
   const now = new Date().toISOString();
   return {
-    schemaVersion: 11, id: createId("project"), name: name.trim() || "Projet sans titre",
+    schemaVersion: 13, id: createId("project"), name: name.trim() || "Projet sans titre",
     description: "", cardColor: "#4d1824", bannerMediaId: null, status: "idea", projectType,
     defaultPageFormat: projectType === "novel" ? "novel" : projectType === "free" ? "free" : "a4",
     targetPages: 0, footerType: "none", footerText: "",
@@ -811,7 +855,7 @@ export function normalizeProject(value: unknown): StudioProject {
     .flatMap((chapter) => chapter.pages ?? [])
     .find((page) => page.footerType && page.footerType !== "none");
   return {
-    schemaVersion: 11,
+    schemaVersion: 13,
     id: input.id,
     name: input.name,
     description: typeof input.description === "string" ? input.description : "",
@@ -843,6 +887,8 @@ export function normalizeProject(value: unknown): StudioProject {
         ? volume.footerText
         : typeof input.footerText === "string" ? input.footerText : legacyFooterPage?.footerText ?? "",
       footerFormat: normalizeFooterFormat(volume.footerFormat),
+      documentLanguage: normalizeWritingLanguage(volume.documentLanguage),
+      spellcheckEnabled: volume.spellcheckEnabled !== false,
       chapters: Array.isArray(volume.chapters) ? volume.chapters.map((chapter, chapterIndex) => ({
         id: typeof chapter.id === "string" ? chapter.id : createId("chapter"),
         title: typeof chapter.title === "string" ? chapter.title : `Chapitre ${chapterIndex + 1}`,
@@ -895,6 +941,12 @@ function normalizeFooterFormat(value: unknown): FooterFormat {
     "page-of-total", "number-of-total", "page-only", "number-only",
     "date-long", "date-short", "date-iso",
   ].includes(String(value)) ? value as FooterFormat : "page-of-total";
+}
+
+function normalizeWritingLanguage(value: unknown): WritingLanguage {
+  return WRITING_LANGUAGES.some((language) => language.value === value)
+    ? value as WritingLanguage
+    : "fr-FR";
 }
 
 function normalizePageFormat(value: unknown, fallback: unknown): PageFormat {
