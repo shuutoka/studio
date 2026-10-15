@@ -1,15 +1,12 @@
 import Typo from "typo-js";
 
-type Segment = { id: string; text: string; language?: string | null };
-type Issue = {
-  segmentId: string;
-  start: number;
-  end: number;
-  kind: "spelling";
-  message: string;
-  replacements: string[];
-  ruleId: "fr-hunspell";
-};
+import {
+  analyzeFrenchProofingSegment,
+  normalizeFrenchWord,
+  type FrenchDictionaryAdapter,
+  type FrenchSpellingIssue,
+  type ProofingTextSegment,
+} from "@/lib/writing-proofing-analyzer";
 
 type IncomingMessage =
   | { type: "preload"; id: number; baseUrl: string }
@@ -21,13 +18,13 @@ type IncomingMessage =
       defaultLanguage: string;
       maxSuggestions: number;
       personalWords: string[];
-      segments: Segment[];
+      segments: ProofingTextSegment[];
     };
 
 type OutgoingMessage =
   | { type: "ready"; id: number }
   | { type: "cancelled"; id: number }
-  | { type: "result"; id: number; issues: Issue[] }
+  | { type: "result"; id: number; issues: FrenchSpellingIssue[] }
   | { type: "error"; id: number; message: string };
 
 type WorkerScope = {
@@ -36,7 +33,6 @@ type WorkerScope = {
 };
 
 const scope = globalThis as unknown as WorkerScope;
-const wordPattern = /[\p{L}\p{M}]+/gu;
 const cancelledRequests = new Set<number>();
 const correctCache = new Map<string, boolean>();
 const suggestionCache = new Map<string, string[]>();
@@ -64,48 +60,39 @@ async function readDictionaryText(response: Response) {
 async function check(message: Extract<IncomingMessage, { type: "check" }>) {
   const dictionary = await loadDictionary(message.baseUrl);
   const personalWords = new Set(message.personalWords.map(normalizeWord));
-  const issues: Issue[] = [];
-  let checkedWords = 0;
-  let suggestionLookups = 0;
+  const issues: FrenchSpellingIssue[] = [];
+  const budget = {
+    remainingIssues: maxIssuesPerCheck,
+    remainingSuggestionLookups: maxSuggestionLookupsPerCheck,
+  };
+  const dictionaryAdapter: FrenchDictionaryAdapter = {
+    check: (word, normalizedWord) => {
+      let correct = readCache(correctCache, normalizedWord);
+      if (correct === undefined) {
+        correct = dictionary.check(word);
+        writeCache(correctCache, normalizedWord, correct, 8_000);
+      }
+      return correct;
+    },
+    suggest: (word, normalizedWord, limit) => {
+      let replacements = readCache(suggestionCache, normalizedWord);
+      if (replacements === undefined) {
+        replacements = dictionary.suggest(word, limit);
+        writeCache(suggestionCache, normalizedWord, replacements, 1_500);
+      }
+      return replacements;
+    },
+  };
 
   for (const segment of message.segments) {
     if (!isFrench(segment.language ?? message.defaultLanguage)) continue;
-    for (const match of segment.text.matchAll(wordPattern)) {
-      if (cancelledRequests.has(message.id) || issues.length >= maxIssuesPerCheck) break;
-      checkedWords += 1;
-      if (checkedWords % 20 === 0) await pauseForMessages();
-
-      const word = match[0];
-      if (word.length < 2 || /^(?:[A-ZÀ-ÖØ-Þ]\.)+$/u.test(word)) continue;
-      const normalized = normalizeWord(word);
-      if (personalWords.has(normalized)) continue;
-
-      let correct = readCache(correctCache, normalized);
-      if (correct === undefined) {
-        correct = dictionary.check(word);
-        writeCache(correctCache, normalized, correct, 8_000);
-      }
-      if (correct) continue;
-
-      let replacements = readCache(suggestionCache, normalized);
-      if (replacements === undefined && suggestionLookups < maxSuggestionLookupsPerCheck) {
-        suggestionLookups += 1;
-        replacements = dictionary.suggest(word, Math.min(5, message.maxSuggestions))
-          .filter((suggestion) => /^[\p{L}\p{M}]+$/u.test(suggestion));
-        writeCache(suggestionCache, normalized, replacements, 1_500);
-      }
-
-      issues.push({
-        segmentId: segment.id,
-        start: match.index,
-        end: match.index + word.length,
-        kind: "spelling",
-        message: `Orthographe : « ${word} »`,
-        replacements: replacements ?? [],
-        ruleId: "fr-hunspell",
-      });
-    }
-    if (issues.length >= maxIssuesPerCheck) break;
+    issues.push(...analyzeFrenchProofingSegment(segment, {
+      dictionary: dictionaryAdapter,
+      personalWords,
+      maxSuggestions: Math.min(5, message.maxSuggestions),
+      budget,
+    }));
+    if (cancelledRequests.has(message.id) || budget.remainingIssues <= 0) break;
   }
 
   if (cancelledRequests.delete(message.id)) {
@@ -143,13 +130,7 @@ function isFrench(language: string | null | undefined) {
   return language?.toLocaleLowerCase("fr").split(/[-_]/u)[0] === "fr";
 }
 
-function normalizeWord(word: string) {
-  return word.normalize("NFC").toLocaleLowerCase("fr-FR");
-}
-
-function pauseForMessages() {
-  return new Promise<void>((resolve) => setTimeout(resolve, 0));
-}
+const normalizeWord = normalizeFrenchWord;
 
 function readCache<T>(cache: Map<string, T>, key: string) {
   const value = cache.get(key);

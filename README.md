@@ -75,8 +75,10 @@ Consultez `LICENSE` et `THIRD_PARTY_NOTICES.md` ; une utilisation propriétaire
 du moteur nécessite une licence commerciale distincte auprès de SuperDoc.
 Le fournisseur de correction utilise `Typo.js` et un dictionnaire Hunspell
 français copié localement pendant le build. Il analyse uniquement les segments
-transmis par SuperDoc et renvoie leurs positions et suggestions. SuperDoc reste
-seul responsable du soulignement et de l’application d’une proposition. Le
+transmis par SuperDoc et renvoie leurs positions UTF-16 exactes, avec une borne
+de fin exclusive. Les propositions contenant un espace ou de la ponctuation
+sont refusées. SuperDoc reste seul responsable du soulignement et de
+l’application d’une proposition. Le
 calcul du dictionnaire est isolé dans un processus Web sans accès à l’éditeur ;
 aucun passage du manuscrit n’est envoyé à un service externe.
 

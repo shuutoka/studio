@@ -21,6 +21,33 @@ after(async () => {
   await vite.close();
 });
 
+const proofingMisspellings = new Map([
+  ["ascenceur", "ascenseur"],
+  ["bonjor", "bonjour"],
+]);
+
+async function analyzeProofingText(text, id = "segment-test") {
+  const { analyzeFrenchProofingSegment } = await vite.ssrLoadModule("/lib/writing-proofing-analyzer.ts");
+  return analyzeFrenchProofingSegment({ id, text, language: "fr-FR" }, {
+    dictionary: {
+      check: (_word, normalizedWord) => !proofingMisspellings.has(normalizedWord),
+      suggest: (_word, normalizedWord) => {
+        const replacement = proofingMisspellings.get(normalizedWord);
+        return replacement ? [` ${replacement}`, replacement, `${replacement} `, replacement] : [];
+      },
+    },
+    personalWords: new Set(),
+    maxSuggestions: 4,
+    budget: { remainingIssues: 60, remainingSuggestionLookups: 4 },
+  });
+}
+
+function applyProofingIssue(text, issue, replacement) {
+  assert.equal(text.slice(issue.start, issue.end), issue.message.match(/« (.*) »/)?.[1]);
+  assert.doesNotMatch(replacement, /\s/u);
+  return text.slice(0, issue.start) + replacement + text.slice(issue.end);
+}
+
 test("forwards progress semantics to the primitive", async () => {
   const { Progress } = await vite.ssrLoadModule("/components/ui/progress.tsx");
   const html = renderToStaticMarkup(React.createElement(Progress, { value: 37 }));
@@ -287,7 +314,7 @@ test("renders the legal notice and requires feedback privacy consent", async () 
   assert.match(app, /globalView === "legal"/);
   assert.match(settingsView, /privacyAccepted/);
   assert.match(settingsView, /J’accepte que les informations saisies/);
-  assert.match(serviceWorker, /enfer-fatal-studio-superdoc-native-proofing/);
+  assert.match(serviceWorker, /enfer-fatal-studio-superdoc-proofing-ranges/);
 });
 
 test("ships the native SuperDoc writing workspace and embeds documents in EFS backups", async () => {
@@ -297,7 +324,7 @@ test("ships the native SuperDoc writing workspace and embeds documents in EFS ba
   const writingDocument = await readFile(path.join(root, "lib/writing-document.ts"), "utf8");
   const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
 
-  assert.equal(packageJson.dependencies["@superdoc/react"], "^2.8.0");
+  assert.equal(packageJson.dependencies["@superdoc/react"], "^2.18.0");
   assert.match(workspace, /SuperDocWritingEditor/);
   assert.doesNotMatch(workspace, /<RichTextEditor/);
   assert.match(superdocEditor, /excludeItems/);
@@ -490,15 +517,15 @@ test("uses native SuperDoc proofing with a read-only local French provider", asy
   assert.match(controls, /Dictionnaire personnel/);
   assert.match(proofing, /enfer-fatal-superdoc-french-proofing/);
   assert.match(proofing, /requiresNetwork: false/);
-  assert.match(proofingWorker, /segmentId: segment\.id/);
-  assert.match(proofingWorker, /start: match\.index/);
-  assert.match(proofingWorker, /end: match\.index \+ word\.length/);
+  assert.match(proofingWorker, /analyzeFrenchProofingSegment/);
   assert.match(proofingWorker, /dictionary\.suggest/);
   assert.match(proofing, /setDefaultLanguage/);
   assert.match(proofing, /new Worker/);
   assert.doesNotMatch(`${proofing}\n${proofingWorker}`, /replaceFile|innerHTML|outerHTML|textContent|activeEditor|querySelector/);
   assert.match(editor, /allowIgnoreWord: true/);
   assert.match(editor, /proofing=\{proofingConfig\}/);
+  assert.equal(packageJson.dependencies["@superdoc/react"], "^2.18.0");
+  assert.equal(packageJson.dependencies.superdoc, "^2.23.0");
   assert.equal(packageJson.dependencies["typo-js"], "^1.4.0");
   assert.equal(packageJson.dependencies.nspell, undefined);
   assert.match(dashboard, /Pages écrites \/ objectif/);
@@ -510,14 +537,114 @@ test("uses native SuperDoc proofing with a read-only local French provider", asy
   assert.match(css, /\[data-slot="select-content"\]/);
 });
 
+test("proofing replaces ascenceur without touching its surrounding spaces", async () => {
+  const initial = "Après un ascenceur émotionnel";
+  const [issue] = await analyzeProofingText(initial);
+
+  assert.deepEqual(
+    { start: issue.start, end: issue.end, replacements: issue.replacements },
+    { start: 9, end: 18, replacements: ["ascenseur"] },
+  );
+  assert.equal(applyProofingIssue(initial, issue, issue.replacements[0]), "Après un ascenseur émotionnel");
+});
+
+test("proofing keeps an exact range when the misspelling starts the segment", async () => {
+  const initial = "ascenceur émotionnel";
+  const [issue] = await analyzeProofingText(initial);
+
+  assert.deepEqual([issue.start, issue.end], [0, 9]);
+  assert.equal(applyProofingIssue(initial, issue, "ascenseur"), "ascenseur émotionnel");
+});
+
+test("proofing keeps an exact range when the misspelling ends the segment", async () => {
+  const initial = "un ascenceur";
+  const [issue] = await analyzeProofingText(initial);
+
+  assert.deepEqual([issue.start, issue.end], [3, 12]);
+  assert.equal(applyProofingIssue(initial, issue, "ascenseur"), "un ascenseur");
+});
+
+test("proofing reports only the bold word and leaves its formatting model unchanged", async () => {
+  const runs = [
+    { text: "un ", bold: false, italic: false, font: "Arial" },
+    { text: "ascenceur", bold: true, italic: false, font: "Georgia" },
+    { text: " émotionnel", bold: false, italic: true, font: "Arial" },
+  ];
+  const beforeAnalysis = structuredClone(runs);
+  const text = runs.map((run) => run.text).join("");
+  const [issue] = await analyzeProofingText(text);
+
+  assert.deepEqual(runs, beforeAnalysis);
+  assert.deepEqual([issue.start, issue.end], [runs[0].text.length, runs[0].text.length + runs[1].text.length]);
+  const correctedRuns = structuredClone(runs);
+  correctedRuns[1].text = applyProofingIssue(runs[1].text, { ...issue, start: 0, end: runs[1].text.length }, "ascenseur");
+  assert.deepEqual(
+    { bold: correctedRuns[1].bold, italic: correctedRuns[1].italic, font: correctedRuns[1].font },
+    { bold: true, italic: false, font: "Georgia" },
+  );
+  assert.equal(`un **${correctedRuns[1].text}** émotionnel`, "un **ascenseur** émotionnel");
+});
+
+test("proofing recalculates the second range after correcting a first misspelling", async () => {
+  let text = "bonjor puis ascenceur";
+  let issues = await analyzeProofingText(text);
+  assert.deepEqual(issues.map(({ start, end }) => [start, end]), [[0, 6], [12, 21]]);
+
+  text = applyProofingIssue(text, issues[0], "bonjour");
+  issues = await analyzeProofingText(text);
+  const secondIssue = issues.find((issue) => text.slice(issue.start, issue.end) === "ascenceur");
+  assert.ok(secondIssue);
+  assert.deepEqual([secondIssue.start, secondIssue.end], [13, 22]);
+  text = applyProofingIssue(text, secondIssue, "ascenseur");
+  assert.equal(text, "bonjour puis ascenseur");
+});
+
+test("proofing uses UTF-16 offsets after accented text and surrogate pairs", async () => {
+  for (const initial of ["Élève ascenceur", "🙂 ascenceur"]) {
+    const [issue] = await analyzeProofingText(initial);
+    const expectedStart = initial.indexOf("ascenceur");
+    assert.deepEqual([issue.start, issue.end], [expectedStart, expectedStart + "ascenceur".length]);
+    assert.equal(applyProofingIssue(initial, issue, "ascenseur"), initial.replace("ascenceur", "ascenseur"));
+  }
+});
+
+test("proofing corrects exact ranges at both paragraph boundaries", async () => {
+  const initial = "ascenceur au milieu puis ascenceur";
+  const issues = await analyzeProofingText(initial);
+
+  assert.deepEqual([issues[0].start, issues[0].end], [0, 9]);
+  assert.deepEqual([issues[1].start, issues[1].end], [initial.length - 9, initial.length]);
+  let corrected = applyProofingIssue(initial, issues[1], "ascenseur");
+  corrected = applyProofingIssue(corrected, issues[0], "ascenseur");
+  assert.equal(corrected, "ascenseur au milieu puis ascenseur");
+});
+
 test("the local French dictionary returns a targeted suggestion", async () => {
   const { default: Typo } = await import("typo-js");
+  const { analyzeFrenchProofingSegment } = await vite.ssrLoadModule("/lib/writing-proofing-analyzer.ts");
   const affData = await readFile(path.join(root, "public/proofing/fr.aff"), "utf8");
   const wordsData = await readFile(path.join(root, "public/proofing/fr.dic"), "utf8");
   const dictionary = new Typo("fr_FR", affData, wordsData);
   assert.equal(dictionary.check("bonjour"), true);
   assert.equal(dictionary.check("bonjor"), false);
   assert.ok(dictionary.suggest("bonjor", 4).includes("bonjour"));
+
+  const [issue] = analyzeFrenchProofingSegment({
+    id: "segment-real-dictionary",
+    text: "Après un ascenceur émotionnel",
+    language: "fr-FR",
+  }, {
+    dictionary: {
+      check: (word) => dictionary.check(word),
+      suggest: (word, _normalizedWord, limit) => dictionary.suggest(word, limit),
+    },
+    personalWords: new Set(),
+    maxSuggestions: 6,
+    budget: { remainingIssues: 60, remainingSuggestionLookups: 4 },
+  });
+  assert.deepEqual([issue.start, issue.end], [9, 18]);
+  assert.ok(issue.replacements.includes("ascenseur"));
+  assert.ok(issue.replacements.every((replacement) => !/\s/u.test(replacement)));
 });
 
 test("formats page numbers and dates for the native footer", async () => {

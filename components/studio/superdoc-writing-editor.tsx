@@ -477,14 +477,9 @@ export function SuperDocWritingEditor({
     commandCleanupRef.current.forEach((cleanup) => cleanup());
     const textCommand = superdoc.ui.commands.register<InsertTextPayload>({
       id: "efs.insert-text",
-      execute: ({ doc, payload }) => {
-        const insert = doc?.insert;
-        if (typeof insert !== "function" || !payload?.text || !payload.target) return false;
-        return insert.call(doc, {
-          target: payload.target,
-          value: payload.text,
-          type: "text",
-        });
+      execute: ({ insertText, payload }) => {
+        if (!payload?.text || !payload.target) return false;
+        return insertText(payload.text);
       },
     });
     const stopObservingSelection = superdoc.ui.selection.observe((selection) => {
