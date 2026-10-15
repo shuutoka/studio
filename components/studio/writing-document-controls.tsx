@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { DATE_FOOTER_FORMATS, footerFormatForType, formatFooterText, PAGE_FOOTER_FORMATS } from "@/lib/writing-footer";
 import {
   PAGE_FORMATS,
@@ -44,6 +45,7 @@ export function WritingDocumentControls({
   onInsert,
   onApplyFooter,
   onApplyLanguage,
+  onSpellcheckEnabledChange,
   commentsVisible,
   onToggleComments,
   drawingEnabled,
@@ -63,6 +65,7 @@ export function WritingDocumentControls({
   onInsert: (text: string) => boolean;
   onApplyFooter: (type: FooterType, text: string, format: FooterFormat) => Promise<void>;
   onApplyLanguage: (language: WritingLanguage, scope: "document" | "selection") => Promise<void>;
+  onSpellcheckEnabledChange: (enabled: boolean) => void;
   commentsVisible: boolean;
   onToggleComments: () => void;
   drawingEnabled: boolean;
@@ -167,6 +170,10 @@ export function WritingDocumentControls({
         <PopoverContent align="start" className="w-80 border-white/10 bg-[#1b1821] text-[#eeeaf2]">
           <PopoverHeader className="mb-4"><PopoverTitle>Correction orthographique</PopoverTitle></PopoverHeader>
           <div className="grid gap-3">
+            <div className="flex items-center justify-between gap-4 rounded-lg border border-white/8 bg-black/15 p-3">
+              <div><p className="text-xs font-medium text-white">Correction automatique</p><p className="mt-0.5 text-[11px] leading-4 text-[#77717f]">Soulignement et suggestions pour ce volume.</p></div>
+              <Switch checked={volume.spellcheckEnabled} onCheckedChange={onSpellcheckEnabledChange} aria-label="Activer la correction orthographique" />
+            </div>
             <label className="grid gap-1.5 text-xs text-[#aaa4b4]">Langue
               <Select value={language} onValueChange={(value: WritingLanguage) => setLanguage(value)}>
                 <SelectTrigger className="w-full border-white/10 bg-black/20"><SelectValue /></SelectTrigger>
@@ -177,7 +184,7 @@ export function WritingDocumentControls({
               <Button disabled={Boolean(applyingLanguage)} onClick={() => void applyLanguage("document")}>{applyingLanguage === "document" ? <LoaderCircle className="animate-spin" /> : <Languages />} Tout le volume</Button>
               <Button variant="outline" className="border-white/10 bg-transparent" disabled={Boolean(applyingLanguage)} onClick={() => void applyLanguage("selection")}>{applyingLanguage === "selection" ? <LoaderCircle className="animate-spin" /> : <Languages />} Sélection</Button>
             </div>
-            <p className="text-[11px] leading-4 text-[#77717f]">La correction orthographique et les suggestions fonctionnent localement. La correction grammaticale complète n’est pas disponible hors ligne dans cette version.</p>
+            <p className="text-[11px] leading-4 text-[#77717f]">La correction et ses suggestions s’exécutent localement dans un processus séparé. Pour changer uniquement un passage, sélectionnez-le avant d’utiliser « Sélection ».</p>
           </div>
         </PopoverContent>
       </Popover>

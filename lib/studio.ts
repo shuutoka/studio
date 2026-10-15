@@ -111,6 +111,8 @@ export type StudioVolume = {
   footerFormat: FooterFormat;
   /** Language used by the local spell checker and stored in the DOCX. */
   documentLanguage: WritingLanguage;
+  /** Allows demanding documents to disable local proofing without changing their language. */
+  spellcheckEnabled: boolean;
   chapters: StudioChapter[];
   /**
    * SuperDoc keeps the canonical document as a DOCX blob in IndexedDB. These
@@ -282,7 +284,7 @@ export type StudioSettings = {
 };
 
 export type StudioProject = {
-  schemaVersion: 12;
+  schemaVersion: 13;
   id: string;
   name: string;
   description: string;
@@ -545,6 +547,7 @@ export function createEmptyVolume(index = 1, title = `Volume ${index}`, pageForm
     footerText: "",
     footerFormat: "page-of-total",
     documentLanguage: "fr-FR",
+    spellcheckEnabled: true,
     chapters: [{ id: createId("chapter"), title: "Contenu", pages: [createEmptyPage()] }],
     documentEngine: "superdoc",
     documentText: "",
@@ -644,7 +647,7 @@ export function getProjectStats(project: StudioProject): ProjectStats {
 export function createBlankProject(name: string, projectType: ProjectType = "manga"): StudioProject {
   const now = new Date().toISOString();
   return {
-    schemaVersion: 12, id: createId("project"), name: name.trim() || "Projet sans titre",
+    schemaVersion: 13, id: createId("project"), name: name.trim() || "Projet sans titre",
     description: "", cardColor: "#4d1824", bannerMediaId: null, status: "idea", projectType,
     defaultPageFormat: projectType === "novel" ? "novel" : projectType === "free" ? "free" : "a4",
     targetPages: 0, footerType: "none", footerText: "",
@@ -824,7 +827,7 @@ export function normalizeProject(value: unknown): StudioProject {
     .flatMap((chapter) => chapter.pages ?? [])
     .find((page) => page.footerType && page.footerType !== "none");
   return {
-    schemaVersion: 12,
+    schemaVersion: 13,
     id: input.id,
     name: input.name,
     description: typeof input.description === "string" ? input.description : "",
@@ -857,6 +860,7 @@ export function normalizeProject(value: unknown): StudioProject {
         : typeof input.footerText === "string" ? input.footerText : legacyFooterPage?.footerText ?? "",
       footerFormat: normalizeFooterFormat(volume.footerFormat),
       documentLanguage: normalizeWritingLanguage(volume.documentLanguage),
+      spellcheckEnabled: volume.spellcheckEnabled !== false,
       chapters: Array.isArray(volume.chapters) ? volume.chapters.map((chapter, chapterIndex) => ({
         id: typeof chapter.id === "string" ? chapter.id : createId("chapter"),
         title: typeof chapter.title === "string" ? chapter.title : `Chapitre ${chapterIndex + 1}`,

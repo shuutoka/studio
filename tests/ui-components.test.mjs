@@ -204,7 +204,7 @@ test("creates and migrates persistent story boards", async () => {
   project.boards[0].folderId = "folder-timeline";
 
   const normalized = normalizeProject(project);
-  assert.equal(normalized.schemaVersion, 12);
+  assert.equal(normalized.schemaVersion, 13);
   assert.equal(normalized.boards[0].name, "Ligne temporelle");
   assert.equal(normalized.boards[0].nodes.length, 2);
   assert.equal(normalized.boards[0].edges[0].label, "Puis");
@@ -287,7 +287,7 @@ test("renders the legal notice and requires feedback privacy consent", async () 
   assert.match(app, /globalView === "legal"/);
   assert.match(settingsView, /privacyAccepted/);
   assert.match(settingsView, /J’accepte que les informations saisies/);
-  assert.match(serviceWorker, /enfer-fatal-studio-proofing-dashboard-mobile/);
+  assert.match(serviceWorker, /enfer-fatal-studio-proofing-worker-pages/);
 });
 
 test("ships the native SuperDoc writing workspace and embeds documents in EFS backups", async () => {
@@ -304,7 +304,7 @@ test("ships the native SuperDoc writing workspace and embeds documents in EFS ba
   assert.match(superdocEditor, /"ai"/);
   assert.match(superdocEditor, /persistWritingDocument/);
   assert.match(writingDocument, /writing-docx/);
-  assert.match(projectFile, /formatVersion:\s*12/);
+  assert.match(projectFile, /formatVersion:\s*13/);
 });
 
 test("keeps SuperDoc inside the Studio viewport without continuous fit-width feedback", async () => {
@@ -351,7 +351,7 @@ test("reconnects Writing 2.1 to Studio preferences and native DOCX metadata", as
   const project = normalizeProject({ ...createBlankProject("Migration 2.1", "novel"), schemaVersion: 7 });
   assert.equal(settings.schemaVersion, 8);
   assert.equal(settings.writingTheme, "follow");
-  assert.equal(project.schemaVersion, 12);
+  assert.equal(project.schemaVersion, 13);
   assert.equal(project.volumes[0].documentLanguage, "fr-FR");
   assert.equal(project.volumes[0].status, "draft");
   assert.equal(project.volumes[0].footerFormat, "page-of-total");
@@ -424,7 +424,7 @@ test("adds review drawings, anchored comments and per-volume paper formats witho
   project.volumes[0].pageFormat = "a5";
   project.volumes[0].documentDrawings = [{ id: "trait-1", pageIndex: 0, anchorBlockId: "A1B2C3D4", anchorParagraphIndex: 0, color: "#ef4f5f", size: 4, points: [{ x: 0.1, y: 0.2 }, { x: 0.2, y: 0.3 }] }];
   const normalized = normalizeProject(project);
-  assert.equal(normalized.schemaVersion, 12);
+  assert.equal(normalized.schemaVersion, 13);
   assert.equal(normalized.volumes[0].pageFormat, "a5");
   assert.equal(normalized.volumes[0].documentDrawings.length, 1);
   assert.equal(normalized.volumes[0].documentDrawings[0].anchorBlockId, "A1B2C3D4");
@@ -455,9 +455,11 @@ test("adds local proofing, dashboard identity editing and mobile-safe drawing", 
   const { createBlankProject, normalizeProject, WRITING_LANGUAGES } = await vite.ssrLoadModule("/lib/studio.ts");
   const project = createBlankProject("Langues", "novel");
   delete project.volumes[0].documentLanguage;
+  delete project.volumes[0].spellcheckEnabled;
   const normalized = normalizeProject(project);
-  assert.equal(normalized.schemaVersion, 12);
+  assert.equal(normalized.schemaVersion, 13);
   assert.equal(normalized.volumes[0].documentLanguage, "fr-FR");
+  assert.equal(normalized.volumes[0].spellcheckEnabled, true);
   assert.equal(WRITING_LANGUAGES.length, 5);
 
   const app = await readFile(path.join(root, "components/studio/studio-app-v3.tsx"), "utf8");
@@ -466,6 +468,7 @@ test("adds local proofing, dashboard identity editing and mobile-safe drawing", 
   const controls = await readFile(path.join(root, "components/studio/writing-document-controls.tsx"), "utf8");
   const editor = await readFile(path.join(root, "components/studio/superdoc-writing-editor.tsx"), "utf8");
   const proofing = await readFile(path.join(root, "lib/writing-proofing.ts"), "utf8");
+  const proofingWorker = await readFile(path.join(root, "lib/writing-proofing.worker.ts"), "utf8");
   const docx = await readFile(path.join(root, "lib/writing-docx.ts"), "utf8");
   const css = await readFile(path.join(root, "app/globals.css"), "utf8");
 
@@ -475,10 +478,19 @@ test("adds local proofing, dashboard identity editing and mobile-safe drawing", 
   assert.match(dashboard, /Modifier le projet/);
   assert.match(workspace, /onOpenSettings/);
   assert.match(controls, /Correction orthographique/);
+  assert.match(controls, /Correction automatique/);
   assert.match(controls, /Tout le volume/);
   assert.match(controls, /Sélection/);
-  assert.match(proofing, /enfer-fatal-local-spelling/);
+  assert.match(proofing, /enfer-fatal-local-spelling-worker/);
   assert.match(proofing, /requiresNetwork: false/);
+  assert.match(proofing, /new Worker/);
+  assert.match(proofing, /setDefaultLanguage/);
+  assert.match(proofingWorker, /maxIssuesPerRequest = 100/);
+  assert.match(proofingWorker, /suggestionCache/);
+  assert.match(proofingWorker, /checker\.suggest/);
+  assert.match(proofingWorker, /return response\.text\(\)/);
+  assert.match(dashboard, /Pages écrites \/ objectif/);
+  assert.match(dashboard, /\$\{stats\.pages\} \/ \$\{project\.targetPages/);
   assert.match(docx, /applyDocxLanguage/);
   assert.match(editor, /attachDrawingShield/);
   assert.match(editor, /virtualKeyboard/);

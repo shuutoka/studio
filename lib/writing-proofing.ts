@@ -1,65 +1,110 @@
-import nspell, { type NSpell } from "nspell";
 import type { SuperDocConfig } from "@superdoc/react";
 
 import type { WritingLanguage } from "@/lib/studio";
 
 type ProofingProvider = NonNullable<NonNullable<SuperDocConfig["proofing"]>["provider"]>;
 type ProofingRequest = Parameters<ProofingProvider["check"]>[0];
-type ProofingSegment = ProofingRequest["segments"][number];
-type ProofingIssue = Awaited<ReturnType<ProofingProvider["check"]>>["issues"][number];
+type ProofingResult = Awaited<ReturnType<ProofingProvider["check"]>>;
 
-const checkerCache = new Map<string, Promise<NSpell>>();
-const wordPattern = /[\p{L}\p{M}]+(?:[’'-][\p{L}\p{M}]+)*/gu;
+type WorkerResponse =
+  | { type: "result"; id: number; issues: ProofingResult["issues"] }
+  | { type: "ready"; id: number }
+  | { type: "cancelled"; id: number }
+  | { type: "error"; id: number; message: string };
 
-function languageBase(language: string | null | undefined) {
-  const base = language?.toLocaleLowerCase("en").split(/[-_]/u)[0];
-  return ["de", "en", "es", "fr"].includes(base ?? "") ? base! : "fr";
-}
+type PendingRequest = {
+  resolve: (result: ProofingResult) => void;
+  reject: (error: Error) => void;
+  removeAbortListener?: () => void;
+};
 
-async function loadChecker(language: string | null | undefined) {
-  const base = languageBase(language);
-  const cached = checkerCache.get(base);
-  if (cached) return cached;
-  const loading = Promise.all([
-    fetch(new URL(`proofing/${base}.aff`, document.baseURI)).then(readDictionaryResponse),
-    fetch(new URL(`proofing/${base}.dic`, document.baseURI)).then(readDictionaryResponse),
-  ]).then(([aff, dic]) => nspell({ aff, dic }));
-  checkerCache.set(base, loading);
-  return loading;
-}
+export type StudioProofingController = {
+  provider: ProofingProvider;
+  preload: (language?: WritingLanguage) => Promise<void>;
+  setDefaultLanguage: (language: WritingLanguage) => void;
+  setEnabled: (enabled: boolean) => void;
+  dispose: () => void;
+};
 
-async function readDictionaryResponse(response: Response) {
-  if (!response.ok) throw new Error(`Dictionnaire orthographique indisponible (${response.status}).`);
-  return new Uint8Array(await response.arrayBuffer());
-}
+export function createStudioProofingProvider(initialLanguage: WritingLanguage): StudioProofingController {
+  let worker: Worker | null = null;
+  let defaultLanguage = initialLanguage;
+  let enabled = true;
+  let nextRequestId = 0;
+  const pending = new Map<number, PendingRequest>();
 
-async function checkSegment(segment: ProofingSegment, fallbackLanguage: string | null | undefined) {
-  const checker = await loadChecker(segment.language ?? fallbackLanguage);
-  const issues: ProofingIssue[] = [];
-  for (const match of segment.text.matchAll(wordPattern)) {
-    const word = match[0];
-    const start = match.index;
-    if (word.length < 2 || /^(?:[A-ZÀ-ÖØ-Þ]\.)+$/u.test(word) || checker.correct(word)) continue;
-    issues.push({
-      segmentId: segment.id,
-      start,
-      end: start + word.length,
-      kind: "spelling",
-      message: `Orthographe : « ${word} »`,
-      replacements: checker.suggest(word).slice(0, 6),
+  const settle = (id: number) => {
+    const request = pending.get(id);
+    if (!request) return null;
+    pending.delete(id);
+    request.removeAbortListener?.();
+    return request;
+  };
+
+  const rejectAll = (message: string) => {
+    pending.forEach((request) => request.reject(new Error(message)));
+    pending.clear();
+  };
+
+  const cancelAll = () => {
+    pending.forEach((request) => {
+      request.removeAbortListener?.();
+      request.resolve({ issues: [] });
     });
-    if (issues.length >= 250) break;
-  }
-  return issues;
-}
+    pending.clear();
+  };
 
-export function preloadWritingDictionary(language: WritingLanguage) {
-  return loadChecker(language).then(() => undefined);
-}
+  const ensureWorker = () => {
+    if (worker) return worker;
+    if (typeof Worker === "undefined") throw new Error("Le correcteur local n’est pas disponible dans ce navigateur.");
+    worker = new Worker(new URL("./writing-proofing.worker.ts", import.meta.url), { type: "module" });
+    worker.addEventListener("message", (event: MessageEvent<WorkerResponse>) => {
+      const message = event.data;
+      const request = settle(message.id);
+      if (!request) return;
+      if (message.type === "error") request.reject(new Error(message.message));
+      else request.resolve({ issues: message.type === "result" ? message.issues : [] });
+    });
+    worker.addEventListener("error", () => {
+      rejectAll("Le processus du correcteur orthographique s’est arrêté.");
+      worker?.terminate();
+      worker = null;
+    });
+    return worker;
+  };
 
-export function createStudioProofingProvider(): ProofingProvider {
-  return {
-    id: "enfer-fatal-local-spelling",
+  const sendCheck = (request: ProofingRequest) => new Promise<ProofingResult>((resolve, reject) => {
+    if (!enabled || !request.segments.length) {
+      resolve({ issues: [] });
+      return;
+    }
+
+    const activeWorker = ensureWorker();
+    const id = ++nextRequestId;
+    const abort = () => {
+      const active = settle(id);
+      if (!active) return;
+      activeWorker.postMessage({ type: "cancel", id });
+      active.resolve({ issues: [] });
+    };
+    const pendingRequest: PendingRequest = { resolve, reject };
+    if (request.signal) {
+      request.signal.addEventListener("abort", abort, { once: true });
+      pendingRequest.removeAbortListener = () => request.signal?.removeEventListener("abort", abort);
+    }
+    pending.set(id, pendingRequest);
+    activeWorker.postMessage({
+      type: "check",
+      id,
+      baseUrl: new URL("proofing/", document.baseURI).toString(),
+      defaultLanguage,
+      maxSuggestions: Math.min(6, Math.max(1, request.maxSuggestions ?? 4)),
+      segments: request.segments,
+    });
+  });
+
+  const provider: ProofingProvider = {
+    id: "enfer-fatal-local-spelling-worker",
     getCapabilities: () => ({
       issueKinds: ["spelling"],
       supportsSuggestions: true,
@@ -67,10 +112,32 @@ export function createStudioProofingProvider(): ProofingProvider {
       supportsBatching: true,
       requiresNetwork: false,
     }),
-    check: async (request) => ({
-      issues: (await Promise.all(request.segments.map((segment) =>
-        checkSegment(segment, request.defaultLanguage),
-      ))).flat(),
+    check: sendCheck,
+  };
+
+  return {
+    provider,
+    preload: (language = defaultLanguage) => new Promise<void>((resolve, reject) => {
+      if (!enabled) {
+        resolve();
+        return;
+      }
+      const activeWorker = ensureWorker();
+      const id = ++nextRequestId;
+      pending.set(id, { resolve: () => resolve(), reject });
+      activeWorker.postMessage({
+        type: "preload",
+        id,
+        baseUrl: new URL("proofing/", document.baseURI).toString(),
+        language,
+      });
     }),
+    setDefaultLanguage: (language) => { defaultLanguage = language; },
+    setEnabled: (value) => { enabled = value; },
+    dispose: () => {
+      cancelAll();
+      worker?.terminate();
+      worker = null;
+    },
   };
 }

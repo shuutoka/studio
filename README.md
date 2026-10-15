@@ -34,7 +34,7 @@ globale `.efs` ou `.zip`.
 - cartes projet personnalisables par couleur et bannière ;
 - mode focus pour l’écriture et navigation par styles de titres ;
 - relecture avec commentaires ancrés et dessin libre tactile/souris, intégré au DOCX exporté ;
-- correction orthographique locale en français, anglais, espagnol et allemand, avec langue par volume ou sélection ;
+- correction orthographique locale en français, anglais, espagnol et allemand, avec suggestions, langue par volume ou sélection et désactivation par volume ;
 - accès aux paramètres dans une fenêtre depuis l’espace d’écriture ;
 - bannière visible et modifiable directement dans le tableau de bord du projet ;
 - mise à l’échelle automatique des feuilles sur smartphone ;
@@ -74,7 +74,9 @@ correspondant à la version proposée sur le site doivent rester accessibles.
 Consultez `LICENSE` et `THIRD_PARTY_NOTICES.md` ; une utilisation propriétaire
 du moteur nécessite une licence commerciale distincte auprès de SuperDoc.
 Le correcteur utilise `nspell` et des dictionnaires Hunspell copiés localement
-pendant le build : aucun passage du manuscrit n’est envoyé à un service externe.
+pendant le build. L’analyse s’exécute dans un Web Worker borné et mis en cache :
+aucun passage du manuscrit n’est envoyé à un service externe et la saisie reste
+isolée du calcul des suggestions.
 
 ## Publier sur GitHub Pages
 

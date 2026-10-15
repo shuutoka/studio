@@ -11,7 +11,7 @@ import { exportDocxWithDrawings, type RenderedDrawingAnchor } from "@/lib/writin
 import { applyDocxFooter, applyDocxLanguage, applyDocxPageFormat, extractDocxOutline, extractDocxText } from "@/lib/writing-docx";
 import { registerActiveWritingDocument } from "@/lib/writing-editor-registry";
 import { persistWritingDocument } from "@/lib/writing-document";
-import { createStudioProofingProvider, preloadWritingDictionary } from "@/lib/writing-proofing";
+import { createStudioProofingProvider } from "@/lib/writing-proofing";
 import {
   createId, PAGE_FORMATS, STANDARD_FONTS, type StudioSettings, type StudioVolume,
   type WritingDrawingStroke, type WritingLanguage,
@@ -133,7 +133,7 @@ export function SuperDocWritingEditor({
       .filter((font) => font.enabled)
       .map((font) => ({ value: font.family, label: font.name, previewFamily: font.family })),
   ], [settings.customFonts, settings.enabledStandardFonts, settings.systemFonts]);
-  const proofingProvider = useMemo(() => createStudioProofingProvider(), []);
+  const [proofingController] = useState(() => createStudioProofingProvider(volume.documentLanguage));
   const proofingErrorShownRef = useRef(false);
 
   const editorUi = useMemo(() => ({
@@ -312,13 +312,18 @@ export function SuperDocWritingEditor({
   }, [capture, printEditor, projectId, ready, volume.documentDrawings, volume.id, volume.pageFormat, volume.title]);
 
   useEffect(() => {
-    if (!ready) return;
-    void preloadWritingDictionary(volume.documentLanguage).catch((error) => {
+    proofingController.setDefaultLanguage(volume.documentLanguage);
+    proofingController.setEnabled(volume.spellcheckEnabled);
+    proofingErrorShownRef.current = false;
+    if (!ready || !volume.spellcheckEnabled) return;
+    void proofingController.preload(volume.documentLanguage).catch((error) => {
       if (proofingErrorShownRef.current) return;
       proofingErrorShownRef.current = true;
       onError(error instanceof Error ? error.message : "Le dictionnaire orthographique n’a pas pu être chargé.");
     });
-  }, [onError, ready, volume.documentLanguage]);
+  }, [onError, proofingController, ready, volume.documentLanguage, volume.spellcheckEnabled]);
+
+  useEffect(() => () => proofingController.dispose(), [proofingController]);
 
   useEffect(() => {
     if (!ready || !navigationTarget?.text) return;
@@ -655,14 +660,16 @@ export function SuperDocWritingEditor({
         ui={editorUi}
         modules={STUDIO_SUPERDOC_MODULES}
         proofing={{
-          enabled: true,
-          provider: proofingProvider,
+          enabled: volume.spellcheckEnabled,
+          provider: proofingController.provider,
           defaultLanguage: volume.documentLanguage,
-          debounceMs: 650,
-          maxSuggestions: 6,
+          debounceMs: 1_000,
+          maxSuggestions: 4,
           visibleFirst: true,
           allowIgnoreWord: true,
-          maxSegmentsPerBatch: 24,
+          maxConcurrentRequests: 1,
+          maxSegmentsPerBatch: 8,
+          timeoutMs: 12_000,
           onProofingError: (error) => {
             if (proofingErrorShownRef.current) return;
             proofingErrorShownRef.current = true;

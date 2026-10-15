@@ -264,6 +264,14 @@ export function WritingWorkspace({
     }
   }
 
+  function updateVolumeSpellcheck(enabled: boolean) {
+    if (!activeVolume) return;
+    updateProject((draft) => {
+      const volume = draft.volumes.find((candidate) => candidate.id === activeVolume.id);
+      if (volume) volume.spellcheckEnabled = enabled;
+    });
+  }
+
   const activeVolumeId = activeVolume?.id ?? null;
 
   const addDrawing = useCallback((stroke: WritingDrawingStroke) => {
@@ -340,6 +348,7 @@ export function WritingWorkspace({
           onInsert={insertIntoDocument}
           onApplyFooter={applyVolumeFooter}
           onApplyLanguage={applyVolumeLanguage}
+          onSpellcheckEnabledChange={updateVolumeSpellcheck}
           commentsVisible={commentsVisible}
           onToggleComments={() => setCommentsVisible((current) => !current)}
           drawingEnabled={drawingEnabled}

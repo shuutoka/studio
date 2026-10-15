@@ -834,7 +834,7 @@ function DashboardView({
         </section>
         <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Metric label="Progression" value={`${stats.progress}%`} icon={BarChart3} />
-          <Metric label="Pages" value={`${stats.completedPages} / ${project.targetPages || stats.pages}`} icon={FileText} />
+          <Metric label="Pages écrites / objectif" value={`${stats.pages} / ${project.targetPages || "—"}`} icon={FileText} />
           <Metric label="Mots" value={stats.words.toLocaleString("fr-FR")} icon={NotebookPen} />
           <Metric label="Objectifs terminés" value={`${stats.completedGoals} / ${project.goals.length}`} icon={Check} />
         </div>
