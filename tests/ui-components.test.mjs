@@ -314,7 +314,7 @@ test("renders the legal notice and requires feedback privacy consent", async () 
   assert.match(app, /globalView === "legal"/);
   assert.match(settingsView, /privacyAccepted/);
   assert.match(settingsView, /J’accepte que les informations saisies/);
-  assert.match(serviceWorker, /enfer-fatal-studio-superdoc-proofing-ranges/);
+  assert.match(serviceWorker, /enfer-fatal-studio-writing-sessions/);
 });
 
 test("ships the native SuperDoc writing workspace and embeds documents in EFS backups", async () => {
@@ -617,6 +617,71 @@ test("proofing corrects exact ranges at both paragraph boundaries", async () => 
   let corrected = applyProofingIssue(initial, issues[1], "ascenseur");
   corrected = applyProofingIssue(corrected, issues[0], "ascenseur");
   assert.equal(corrected, "ascenseur au milieu puis ascenseur");
+});
+
+test("calculates manuscript progress from written pages and caps it at 100 percent", async () => {
+  const { createBlankProject, getProjectStats } = await vite.ssrLoadModule("/lib/studio.ts");
+  const project = createBlankProject("Progression", "novel");
+  project.volumes[0].documentEngine = "superdoc";
+  project.volumes[0].documentText = "Une page écrite.";
+  project.volumes[0].documentPageCount = 5;
+  project.targetPages = 10;
+  assert.deepEqual(
+    { pages: getProjectStats(project).pages, progress: getProjectStats(project).progress },
+    { pages: 5, progress: 50 },
+  );
+
+  project.volumes[0].documentPageCount = 11;
+  project.targetPages = 20;
+  assert.equal(getProjectStats(project).progress, 55);
+
+  project.targetPages = 7;
+  assert.deepEqual(
+    { pages: getProjectStats(project).pages, progress: getProjectStats(project).progress },
+    { pages: 11, progress: 100 },
+  );
+
+  project.targetPages = 0;
+  assert.equal(getProjectStats(project).progress, 0);
+});
+
+test("keeps only the three most recently used writing volume sessions", async () => {
+  const {
+    MAX_CACHED_WRITING_VOLUMES, touchWritingSession,
+  } = await vite.ssrLoadModule("/lib/writing-session-cache.ts");
+  let sessions = [];
+  for (const volumeId of ["volume-1", "volume-2", "volume-3"]) {
+    sessions = touchWritingSession(sessions, { volumeId }).sessions;
+  }
+  const touched = touchWritingSession(sessions, { volumeId: "volume-1" });
+  assert.deepEqual(touched.sessions.map(({ volumeId }) => volumeId), ["volume-2", "volume-3", "volume-1"]);
+
+  const withFourth = touchWritingSession(touched.sessions, { volumeId: "volume-4" });
+  assert.equal(withFourth.sessions.length, MAX_CACHED_WRITING_VOLUMES);
+  assert.deepEqual(withFourth.sessions.map(({ volumeId }) => volumeId), ["volume-3", "volume-1", "volume-4"]);
+  assert.deepEqual(withFourth.evicted.map(({ volumeId }) => volumeId), ["volume-2"]);
+});
+
+test("keeps SuperDoc sessions mounted across Studio navigation", async () => {
+  const app = await readFile(path.join(root, "components/studio/studio-app-v3.tsx"), "utf8");
+  const projectWorkspace = await readFile(path.join(root, "components/studio/studio-app.tsx"), "utf8");
+  const writingWorkspace = await readFile(path.join(root, "components/studio/writing-workspace.tsx"), "utf8");
+  const editor = await readFile(path.join(root, "components/studio/superdoc-writing-editor.tsx"), "utf8");
+  const database = await readFile(path.join(root, "lib/studio-db.ts"), "utf8");
+
+  assert.match(app, /projectOpen/);
+  assert.match(app, /visible=\{projectOpen\}/);
+  assert.match(app, /function showGlobal\(view: GlobalView\) \{\s*void saveOpenWritingDocumentSessions\(\);\s*setProjectOpen\(false\);/);
+  assert.match(projectWorkspace, /active=\{visible && section === "writing"\}/);
+  assert.match(writingWorkspace, /MAX_CACHED_WRITING_VOLUMES/);
+  assert.match(writingWorkspace, /saveSessionState/);
+  assert.match(editor, /loadWritingSession/);
+  assert.match(editor, /persistWritingSession/);
+  assert.match(editor, /scrollTop/);
+  assert.match(editor, /instance\.setZoom\(state\.zoom\)/);
+  assert.match(editor, /instance\.ui\.selection\.apply\(state\.selection\)/);
+  assert.match(database, /writing-sessions/);
+  assert.doesNotMatch(`${app}\n${projectWorkspace}\n${writingWorkspace}`, /window\.location\s*=/);
 });
 
 test("the local French dictionary returns a targeted suggestion", async () => {

@@ -7,10 +7,26 @@ import {
 } from "@/lib/studio";
 
 const DATABASE_NAME = "enfer-fatal-studio";
-const DATABASE_VERSION = 3;
+const DATABASE_VERSION = 4;
 const PROJECT_STORE = "projects";
 const MEDIA_STORE = "media";
 const SETTINGS_STORE = "settings";
+const WRITING_SESSION_STORE = "writing-sessions";
+
+export type StoredWritingSession = {
+  id: string;
+  projectId: string;
+  volumeId: string;
+  scrollTop: number;
+  scrollLeft: number;
+  zoom: number;
+  selection: unknown | null;
+  updatedAt: string;
+};
+
+function writingSessionId(projectId: string, volumeId: string) {
+  return `${projectId}:${volumeId}`;
+}
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -26,6 +42,10 @@ function openDatabase(): Promise<IDBDatabase> {
       }
       if (!database.objectStoreNames.contains(SETTINGS_STORE)) {
         database.createObjectStore(SETTINGS_STORE, { keyPath: "id" });
+      }
+      if (!database.objectStoreNames.contains(WRITING_SESSION_STORE)) {
+        const store = database.createObjectStore(WRITING_SESSION_STORE, { keyPath: "id" });
+        store.createIndex("projectId", "projectId", { unique: false });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -73,6 +93,43 @@ export async function persistSettings(settings: StudioSettings) {
   return new Promise<void>((resolve, reject) => {
     const transaction = database.transaction(SETTINGS_STORE, "readwrite");
     transaction.objectStore(SETTINGS_STORE).put(settings);
+    transaction.oncomplete = () => { database.close(); resolve(); };
+    transaction.onerror = () => { database.close(); reject(transaction.error); };
+  });
+}
+
+export async function loadWritingSession(projectId: string, volumeId: string) {
+  const database = await openDatabase();
+  return new Promise<StoredWritingSession | null>((resolve, reject) => {
+    const transaction = database.transaction(WRITING_SESSION_STORE, "readonly");
+    const request = transaction.objectStore(WRITING_SESSION_STORE).get(writingSessionId(projectId, volumeId));
+    request.onsuccess = () => resolve((request.result as StoredWritingSession | undefined) ?? null);
+    request.onerror = () => reject(request.error);
+    transaction.oncomplete = () => database.close();
+  });
+}
+
+export async function persistWritingSession(
+  session: Omit<StoredWritingSession, "id" | "updatedAt">,
+) {
+  const database = await openDatabase();
+  return new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(WRITING_SESSION_STORE, "readwrite");
+    transaction.objectStore(WRITING_SESSION_STORE).put({
+      ...session,
+      id: writingSessionId(session.projectId, session.volumeId),
+      updatedAt: new Date().toISOString(),
+    } satisfies StoredWritingSession);
+    transaction.oncomplete = () => { database.close(); resolve(); };
+    transaction.onerror = () => { database.close(); reject(transaction.error); };
+  });
+}
+
+export async function deleteWritingSession(projectId: string, volumeId: string) {
+  const database = await openDatabase();
+  return new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(WRITING_SESSION_STORE, "readwrite");
+    transaction.objectStore(WRITING_SESSION_STORE).delete(writingSessionId(projectId, volumeId));
     transaction.oncomplete = () => { database.close(); resolve(); };
     transaction.onerror = () => { database.close(); reject(transaction.error); };
   });
@@ -136,13 +193,20 @@ export async function deleteMedia(mediaId: string) {
 export async function deleteStoredProject(projectId: string) {
   const database = await openDatabase();
   return new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction([PROJECT_STORE, MEDIA_STORE], "readwrite");
+    const transaction = database.transaction([PROJECT_STORE, MEDIA_STORE, WRITING_SESSION_STORE], "readwrite");
     transaction.objectStore(PROJECT_STORE).delete(projectId);
     const cursorRequest = transaction.objectStore(MEDIA_STORE).index("projectId").openKeyCursor(IDBKeyRange.only(projectId));
     cursorRequest.onsuccess = () => {
       const cursor = cursorRequest.result;
       if (!cursor) return;
       transaction.objectStore(MEDIA_STORE).delete(cursor.primaryKey);
+      cursor.continue();
+    };
+    const sessionCursorRequest = transaction.objectStore(WRITING_SESSION_STORE).index("projectId").openKeyCursor(IDBKeyRange.only(projectId));
+    sessionCursorRequest.onsuccess = () => {
+      const cursor = sessionCursorRequest.result;
+      if (!cursor) return;
+      transaction.objectStore(WRITING_SESSION_STORE).delete(cursor.primaryKey);
       cursor.continue();
     };
     transaction.oncomplete = () => { database.close(); resolve(); };
@@ -158,13 +222,14 @@ export async function replaceLocalStudio(
   const database = await openDatabase();
   return new Promise<void>((resolve, reject) => {
     const transaction = database.transaction(
-      [PROJECT_STORE, MEDIA_STORE, SETTINGS_STORE],
+      [PROJECT_STORE, MEDIA_STORE, SETTINGS_STORE, WRITING_SESSION_STORE],
       "readwrite",
     );
     const projectStore = transaction.objectStore(PROJECT_STORE);
     const mediaStore = transaction.objectStore(MEDIA_STORE);
     projectStore.clear();
     mediaStore.clear();
+    transaction.objectStore(WRITING_SESSION_STORE).clear();
     projects.forEach((project) => projectStore.put(project));
     media.forEach((item) => mediaStore.put(item));
     transaction.objectStore(SETTINGS_STORE).put(settings);

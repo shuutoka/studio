@@ -11,6 +11,9 @@ import { exportDocxWithDrawings, type RenderedDrawingAnchor } from "@/lib/writin
 import { applyDocxFooter, applyDocxLanguage, applyDocxPageFormat, extractDocxOutline, extractDocxText } from "@/lib/writing-docx";
 import { registerActiveWritingDocument } from "@/lib/writing-editor-registry";
 import { persistWritingDocument } from "@/lib/writing-document";
+import {
+  loadWritingSession, persistWritingSession, type StoredWritingSession,
+} from "@/lib/studio-db";
 import { createSuperDocFrenchProofingProvider } from "@/lib/writing-proofing";
 import {
   createId, PAGE_FORMATS, STANDARD_FONTS, type StudioSettings, type StudioVolume,
@@ -77,6 +80,7 @@ export function SuperDocWritingEditor({
   navigationTarget,
   onSnapshot,
   onError,
+  active,
   commentsVisible,
   drawingTool,
   onAddDrawing,
@@ -88,6 +92,7 @@ export function SuperDocWritingEditor({
   navigationTarget?: { text: string; token: number } | null;
   onSnapshot: (snapshot: WritingDocumentSnapshot) => void;
   onError: (message: string) => void;
+  active: boolean;
   commentsVisible: boolean;
   drawingTool: { enabled: boolean; color: string; size: number };
   onAddDrawing: (stroke: WritingDrawingStroke) => void;
@@ -102,6 +107,10 @@ export function SuperDocWritingEditor({
   const pendingBodyStyleResetRef = useRef<PendingBodyStyleReset | null>(null);
   const replayingNativePageBreakRef = useRef(false);
   const pageBreakShortcutRef = useRef(settings.shortcuts.pageBreak);
+  const sessionStateRef = useRef<StoredWritingSession | null>(null);
+  const sessionSaveTimerRef = useRef<number | null>(null);
+  const sessionRestoreFrameRef = useRef<number | null>(null);
+  const scrollContainerRef = useRef<HTMLElement | null>(null);
   const latestTextRef = useRef(volume.documentText);
   const nextFrenchQuoteIsOpening = useRef(true);
   const pendingDoublePress = useRef<{ shortcut: string; fallback: string; timer: number } | null>(null);
@@ -116,6 +125,7 @@ export function SuperDocWritingEditor({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [superdocInstance, setSuperdocInstance] = useState<SuperDocInstance | null>(null);
+  const [sessionStateRevision, setSessionStateRevision] = useState(0);
   const [shellElement, setShellElement] = useState<HTMLDivElement | null>(null);
   const assignShellRef = useCallback((node: HTMLDivElement | null) => {
     shellRef.current = node;
@@ -167,6 +177,37 @@ export function SuperDocWritingEditor({
       },
     },
   }), [fontOptions]);
+
+  const saveSessionState = useCallback(async () => {
+    const instance = editorRef.current?.getInstance();
+    const shell = shellRef.current;
+    if (!instance || !shell) return;
+    const scrollContainer = findEditorScrollContainer(shell, scrollContainerRef.current);
+    scrollContainerRef.current = scrollContainer;
+    const selection = instance.ui.selection.current()?.selectionTarget ?? lastSelectionTargetRef.current;
+    const state = {
+      projectId,
+      volumeId: volume.id,
+      scrollTop: scrollContainer?.scrollTop ?? 0,
+      scrollLeft: scrollContainer?.scrollLeft ?? 0,
+      zoom: instance.getZoom(),
+      selection: selection ? structuredClone(selection) : null,
+    };
+    sessionStateRef.current = {
+      ...state,
+      id: `${projectId}:${volume.id}`,
+      updatedAt: new Date().toISOString(),
+    };
+    await persistWritingSession(state);
+  }, [projectId, volume.id]);
+
+  const scheduleSessionStateSave = useCallback(() => {
+    if (sessionSaveTimerRef.current) window.clearTimeout(sessionSaveTimerRef.current);
+    sessionSaveTimerRef.current = window.setTimeout(() => {
+      sessionSaveTimerRef.current = null;
+      void saveSessionState();
+    }, 450);
+  }, [saveSessionState]);
 
   const capture = useCallback(async () => {
     const instance = editorRef.current?.getInstance();
@@ -253,10 +294,75 @@ export function SuperDocWritingEditor({
 
   useEffect(() => () => {
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    if (sessionSaveTimerRef.current) window.clearTimeout(sessionSaveTimerRef.current);
+    if (sessionRestoreFrameRef.current) window.cancelAnimationFrame(sessionRestoreFrameRef.current);
     if (pendingDoublePress.current) window.clearTimeout(pendingDoublePress.current.timer);
     if (pendingBodyStyleResetRef.current) window.clearTimeout(pendingBodyStyleResetRef.current.timer);
     commandCleanupRef.current.forEach((cleanup) => cleanup());
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadWritingSession(projectId, volume.id)
+      .then((state) => {
+        if (cancelled || !state) return;
+        sessionStateRef.current = state;
+        setSessionStateRevision((revision) => revision + 1);
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [projectId, volume.id]);
+
+  useEffect(() => {
+    if (!ready || !active) return;
+    const shell = shellRef.current;
+    if (!shell) return;
+    const onScroll = () => scheduleSessionStateSave();
+    shell.addEventListener("scroll", onScroll, true);
+    const interval = window.setInterval(() => void saveSessionState(), 5_000);
+    return () => {
+      shell.removeEventListener("scroll", onScroll, true);
+      window.clearInterval(interval);
+    };
+  }, [active, ready, saveSessionState, scheduleSessionStateSave]);
+
+  useEffect(() => () => { void saveSessionState(); }, [saveSessionState]);
+
+  useEffect(() => {
+    if (!ready) return;
+    if (!active) {
+      void saveSessionState();
+      return;
+    }
+    const state = sessionStateRef.current;
+    if (!state) return;
+    if (sessionRestoreFrameRef.current) window.cancelAnimationFrame(sessionRestoreFrameRef.current);
+    sessionRestoreFrameRef.current = window.requestAnimationFrame(() => {
+      sessionRestoreFrameRef.current = window.requestAnimationFrame(() => {
+        const instance = editorRef.current?.getInstance();
+        const shell = shellRef.current;
+        if (!instance || !shell) return;
+        instance.setZoom(state.zoom);
+        const scrollContainer = findEditorScrollContainer(shell, scrollContainerRef.current);
+        scrollContainerRef.current = scrollContainer;
+        if (scrollContainer) {
+          scrollContainer.scrollTop = state.scrollTop;
+          scrollContainer.scrollLeft = state.scrollLeft;
+        }
+        if (isSelectionTarget(state.selection)) {
+          try {
+            lastSelectionTargetRef.current = state.selection;
+            instance.ui.selection.apply(state.selection);
+          } catch {
+            // The document may have changed since the session was stored.
+          }
+        }
+      });
+    });
+    return () => {
+      if (sessionRestoreFrameRef.current) window.cancelAnimationFrame(sessionRestoreFrameRef.current);
+    };
+  }, [active, ready, sessionStateRevision, saveSessionState]);
 
   useEffect(() => { nextFrenchQuoteIsOpening.current = true; }, [settings.quoteStyle]);
   useEffect(() => { pageBreakShortcutRef.current = settings.shortcuts.pageBreak; }, [settings.shortcuts.pageBreak]);
@@ -265,6 +371,7 @@ export function SuperDocWritingEditor({
     if (!ready) return;
     return registerActiveWritingDocument(volume.id, {
       flush: capture,
+      saveSessionState,
       exportDocx: async () => {
         const instance = editorRef.current?.getInstance();
         if (!instance) throw new Error("L’éditeur n’est pas prêt.");
@@ -328,7 +435,7 @@ export function SuperDocWritingEditor({
         window.setTimeout(() => void capture(), 160);
       },
     });
-  }, [capture, printEditor, projectId, ready, volume.documentDrawings, volume.id, volume.pageFormat, volume.title]);
+  }, [capture, printEditor, projectId, ready, saveSessionState, volume.documentDrawings, volume.id, volume.pageFormat, volume.title]);
 
   useEffect(() => {
     proofingController.setDefaultLanguage(volume.documentLanguage);
@@ -483,7 +590,10 @@ export function SuperDocWritingEditor({
       },
     });
     const stopObservingSelection = superdoc.ui.selection.observe((selection) => {
-      if (selection.selectionTarget) lastSelectionTargetRef.current = selection.selectionTarget;
+      if (selection.selectionTarget) {
+        lastSelectionTargetRef.current = selection.selectionTarget;
+        scheduleSessionStateSave();
+      }
       const pending = pendingBodyStyleResetRef.current;
       const currentBlockId = getTextBlockId(selection.selectionTarget);
       if (!pending || !currentBlockId || currentBlockId === pending.sourceBlockId) return;
@@ -646,6 +756,7 @@ export function SuperDocWritingEditor({
     <div
       ref={assignShellRef}
       className="superdoc-writing-shell relative flex w-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden"
+      data-session-active={active ? "true" : "false"}
       data-paper-color-mode={settings.paperColorMode}
       data-comments-visible={commentsVisible ? "true" : "false"}
       data-drawing-active={drawingTool.enabled ? "true" : "false"}
@@ -1031,6 +1142,22 @@ function getTextBlockId(target: SelectionTarget | null | undefined) {
 function selectionIsCollapsed(target: SelectionTarget) {
   return target.start.kind === "text" && target.end.kind === "text" &&
     target.start.blockId === target.end.blockId && target.start.offset === target.end.offset;
+}
+
+function isSelectionTarget(value: unknown): value is SelectionTarget {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<SelectionTarget>;
+  return candidate.kind === "selection" && Boolean(candidate.start) && Boolean(candidate.end);
+}
+
+function findEditorScrollContainer(shell: HTMLElement, previous: HTMLElement | null) {
+  if (previous && shell.contains(previous) && previous.scrollHeight > previous.clientHeight) return previous;
+  const candidates = [shell, ...shell.querySelectorAll<HTMLElement>(".superdoc-editor-container, .superdoc__layers, .superdoc__sub-document, .v2-super-editor, .v2-super-editor__stage, [class*='scroll']")];
+  return candidates
+    .filter((candidate) => !candidate.closest(".efs-comments-layer, .superdoc-toolbar-container, .toolbar-dropdown-menu"))
+    .map((candidate) => ({ candidate, overflow: candidate.scrollHeight - candidate.clientHeight }))
+    .filter(({ overflow }) => overflow > 1)
+    .sort((left, right) => right.overflow - left.overflow)[0]?.candidate ?? null;
 }
 
 function isBodyTextStyle(styleId: string, styleName: string | null) {

@@ -736,6 +736,7 @@ export function ProjectWorkspace({
   onDeleteProject,
   settings,
   updateSettings,
+  visible = true,
   focusMode = false,
   onToggleFocus = () => undefined,
   onOpenSettings = () => undefined,
@@ -755,17 +756,22 @@ export function ProjectWorkspace({
   onDeleteProject: () => void;
   settings?: StudioSettings;
   updateSettings?: (mutate: (draft: StudioSettings) => void) => void;
+  visible?: boolean;
   focusMode?: boolean;
   onToggleFocus?: () => void;
   onOpenSettings?: () => void;
 }) {
   const effectiveSettings = settings ?? createDefaultSettings();
   const effectiveUpdateSettings = updateSettings ?? (() => undefined);
-  if (section === "writing") return <WritingWorkspace project={project} selectedPageId={selectedPageId} onSelectPage={onSelectPage} updateProject={updateProject} settings={effectiveSettings} updateSettings={effectiveUpdateSettings} focusMode={focusMode} onToggleFocus={onToggleFocus} onOpenSettings={onOpenSettings} />;
-  if (section === "characters") return <CharacterManager project={project} selectedCharacterId={selectedCharacterId} onSelectCharacter={onSelectCharacter} updateProject={updateProject} uploadMedia={uploadMedia} removeMedia={removeMedia} />;
-  if (section === "boards") return <BoardsWorkspace project={project} updateProject={updateProject} uploadMedia={uploadMedia} onOpenCharacter={onOpenCharacter ?? onSelectCharacter} />;
-  if (section === "notes") return <NotesView project={project} selectedNoteId={selectedNoteId} onSelectNote={onSelectNote} updateProject={updateProject} />;
-  return <DashboardView project={project} updateProject={updateProject} uploadMedia={uploadMedia} removeMedia={removeMedia} onDeleteProject={onDeleteProject} />;
+  return <>
+    <div className={visible && section === "writing" ? "contents" : "hidden"} aria-hidden={!visible || section !== "writing"}>
+      <WritingWorkspace project={project} selectedPageId={selectedPageId} onSelectPage={onSelectPage} updateProject={updateProject} settings={effectiveSettings} updateSettings={effectiveUpdateSettings} focusMode={focusMode} onToggleFocus={onToggleFocus} onOpenSettings={onOpenSettings} active={visible && section === "writing"} />
+    </div>
+    {visible && section === "characters" && <CharacterManager project={project} selectedCharacterId={selectedCharacterId} onSelectCharacter={onSelectCharacter} updateProject={updateProject} uploadMedia={uploadMedia} removeMedia={removeMedia} />}
+    {visible && section === "boards" && <BoardsWorkspace project={project} updateProject={updateProject} uploadMedia={uploadMedia} onOpenCharacter={onOpenCharacter ?? onSelectCharacter} />}
+    {visible && section === "notes" && <NotesView project={project} selectedNoteId={selectedNoteId} onSelectNote={onSelectNote} updateProject={updateProject} />}
+    {visible && section === "dashboard" && <DashboardView project={project} updateProject={updateProject} uploadMedia={uploadMedia} removeMedia={removeMedia} onDeleteProject={onDeleteProject} />}
+  </>;
 }
 
 function DashboardView({
@@ -841,8 +847,8 @@ function DashboardView({
 
         <div className="grid gap-5 lg:grid-cols-[1.25fr_.9fr]">
           <section className="rounded-2xl border border-white/8 bg-[#131218] p-5 sm:p-6">
-            <h2 className="font-semibold text-white">Progression du manuscrit</h2><p className="mt-1 text-sm text-[#8f8996]">Calculée à partir des pages marquées comme terminées.</p>
-            <div className="mt-6 rounded-xl bg-black/20 p-5"><div className="mb-3 flex justify-between text-sm"><span className="text-[#aaa4b4]">Pages terminées</span><span className="font-semibold text-white">{stats.completedPages} sur {project.targetPages || stats.pages}</span></div><Progress value={stats.progress} className="h-2 bg-white/7 [&>div]:bg-[#ef4f5f]" /><div className="mt-5 grid grid-cols-3 gap-3 text-center"><SmallCount label="Volumes" value={stats.volumes} /><SmallCount label="Pages" value={stats.pages} /><SmallCount label="Personnages" value={stats.characters} /></div></div>
+            <h2 className="font-semibold text-white">Progression du manuscrit</h2><p className="mt-1 text-sm text-[#8f8996]">Calculée à partir du nombre réel de pages écrites.</p>
+            <div className="mt-6 rounded-xl bg-black/20 p-5"><div className="mb-3 flex justify-between text-sm"><span className="text-[#aaa4b4]">Pages écrites</span><span className="font-semibold text-white">{stats.pages} / {project.targetPages || "—"}</span></div><Progress value={stats.progress} className="h-2 bg-white/7 [&>div]:bg-[#ef4f5f]" /><div className="mt-5 grid grid-cols-3 gap-3 text-center"><SmallCount label="Volumes" value={stats.volumes} /><SmallCount label="Pages" value={stats.pages} /><SmallCount label="Personnages" value={stats.characters} /></div></div>
           </section>
 
           <section className="rounded-2xl border border-white/8 bg-[#131218] p-5 sm:p-6">

@@ -36,7 +36,9 @@ import { playInterfaceSound } from "@/lib/interface-sound";
 import { optimizeImage } from "@/lib/image-optimization";
 import { downloadStudioBackup, readStudioBackup } from "@/lib/project-file";
 import { isShortcutRecorderTarget, matchesShortcut } from "@/lib/shortcuts";
-import { flushOpenWritingDocuments } from "@/lib/writing-editor-registry";
+import {
+  flushOpenWritingDocuments, saveOpenWritingDocumentSessions,
+} from "@/lib/writing-editor-registry";
 import {
   deleteMedia, deleteStoredProject, loadProjects, loadSettings, persistMedia,
   persistProjects, persistSettings, replaceLocalStudio,
@@ -62,6 +64,7 @@ export function StudioAppV3() {
   const [backupAvailable, setBackupAvailable] = useState(false);
   const [globalView, setGlobalView] = useState<GlobalView>("home");
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [projectOpen, setProjectOpen] = useState(false);
   const [section, setSection] = useState<Section>("dashboard");
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
   const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(null);
@@ -75,6 +78,7 @@ export function StudioAppV3() {
   const recoveryProjects = useRef<StudioProject[]>([]);
   const recoverySettings = useRef<StudioSettings>(createDefaultSettings());
   const importInputRef = useRef<HTMLInputElement>(null);
+  const selectedPageByProjectRef = useRef(new Map<string, string>());
 
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId) ?? null,
@@ -224,6 +228,7 @@ export function StudioAppV3() {
       setProjects(restoredProjects);
       setSettings(restoredSettings);
       setActiveProjectId(null);
+      setProjectOpen(false);
       setGlobalView("home");
       setLoaded(true);
       setStartupOpen(false);
@@ -246,18 +251,36 @@ export function StudioAppV3() {
     });
   }, [importBackup]);
 
-  function openProject(project: StudioProject, destination: Section = "dashboard") {
+  async function openProject(project: StudioProject, destination: Section = "dashboard") {
+    if (activeProjectId && activeProjectId !== project.id) {
+      await Promise.all([
+        flushOpenWritingDocuments().catch(() => undefined),
+        saveOpenWritingDocumentSessions().catch(() => undefined),
+      ]);
+    }
     setActiveProjectId(project.id);
+    setProjectOpen(true);
     setSection(destination);
-    setSelectedPageId(firstPageId(project));
+    setSelectedPageId(selectedPageByProjectRef.current.get(project.id) ?? firstPageId(project));
     setSelectedCharacterId(project.characters[0]?.id ?? null);
     setSelectedNoteId(project.notes[0]?.id ?? null);
   }
 
   function showGlobal(view: GlobalView) {
-    setActiveProjectId(null);
+    void saveOpenWritingDocumentSessions();
+    setProjectOpen(false);
     setFocusMode(false);
     setGlobalView(view);
+  }
+
+  function selectWritingPage(pageId: string) {
+    if (activeProjectId) selectedPageByProjectRef.current.set(activeProjectId, pageId);
+    setSelectedPageId(pageId);
+  }
+
+  function changeProjectSection(nextSection: Section) {
+    if (section === "writing" && nextSection !== "writing") void saveOpenWritingDocumentSessions();
+    setSection(nextSection);
   }
 
   function createProject() {
@@ -325,7 +348,11 @@ export function StudioAppV3() {
     await deleteStoredProject(deleteTarget.id).catch(() => undefined);
     setProjects((current) => current.filter((project) => project.id !== deleteTarget.id));
     updateSettings(() => undefined);
-    if (activeProjectId === deleteTarget.id) showGlobal("home");
+    if (activeProjectId === deleteTarget.id) {
+      setActiveProjectId(null);
+      selectedPageByProjectRef.current.delete(deleteTarget.id);
+      showGlobal("home");
+    }
     toast.success(`${deleteTarget.name} a été supprimé de cet appareil.`);
     setDeleteTarget(null);
   }
@@ -359,18 +386,19 @@ export function StudioAppV3() {
     <SidebarProvider defaultOpen>
       <div className={`studio-shell theme-${settings.theme} flex min-h-svh w-full bg-[#0c0b0f] text-[#eeeaf2]`}>
         <StudioSidebarV3
-          activeProject={activeProject} globalView={globalView} section={section}
+          activeProject={projectOpen ? activeProject : null} globalView={globalView} section={section}
           recentProjects={projects.slice(0, 4)} dirty={hasUnsavedChanges}
-          onGlobal={showGlobal} onOpenProject={openProject} onSectionChange={setSection}
+          onGlobal={showGlobal} onOpenProject={openProject} onSectionChange={changeProjectSection}
           onCreate={() => setCreateDialogOpen(true)} onSave={() => void saveAll()}
         />
         <SidebarInset className="min-w-0 bg-transparent">
-          <StudioTopbarV3 activeProject={activeProject} globalView={globalView} section={section} dirty={hasUnsavedChanges} extension={settings.backupExtension} onHome={() => showGlobal("home")} onSave={() => void saveAll()} />
-          {!loaded ? <LoadingView /> : activeProject ? (
-            <ProjectWorkspace
+          <StudioTopbarV3 activeProject={projectOpen ? activeProject : null} globalView={globalView} section={section} dirty={hasUnsavedChanges} extension={settings.backupExtension} onHome={() => showGlobal("home")} onSave={() => void saveAll()} />
+          {!loaded ? <LoadingView /> : <>
+            {activeProject && <ProjectWorkspace
+              key={activeProject.id}
               project={activeProject} section={section} selectedPageId={selectedPageId}
               selectedCharacterId={selectedCharacterId} selectedNoteId={selectedNoteId}
-              onSelectPage={setSelectedPageId} onSelectCharacter={setSelectedCharacterId}
+              onSelectPage={selectWritingPage} onSelectCharacter={setSelectedCharacterId}
               onOpenCharacter={(id) => { setSelectedCharacterId(id); setSection("characters"); }}
               onSelectNote={setSelectedNoteId} updateProject={updateActiveProject}
               uploadMedia={uploadMedia} removeMedia={deleteMedia}
@@ -378,8 +406,9 @@ export function StudioAppV3() {
               updateSettings={updateSettings} focusMode={focusMode}
               onToggleFocus={() => setFocusMode((current) => !current)}
               onOpenSettings={() => setSettingsDialogOpen(true)}
-            />
-          ) : globalView === "library" ? (
+              visible={projectOpen}
+            />}
+            {!projectOpen && (globalView === "library" ? (
             <GlobalLibrary projects={projects} onOpenCharacter={openGlobalCharacter} />
           ) : globalView === "media" ? (
             <MediaGallery projects={projects} onOpenProject={(project) => openProject(project)} onOpenCharacter={(project, characterId) => { openProject(project, "characters"); setSelectedCharacterId(characterId); }} onLinkCharacterImage={setCharacterImageLink} />
@@ -389,7 +418,8 @@ export function StudioAppV3() {
             <LegalInformation />
           ) : (
             <HomeView projects={projects} onCreate={() => setCreateDialogOpen(true)} onImport={() => importInputRef.current?.click()} onOpen={openProject} onDelete={setDeleteTarget} onLibrary={() => showGlobal("library")} onCustomize={customizeProjectCard} />
-          )}
+          ))}
+          </>}
         </SidebarInset>
       </div>
 

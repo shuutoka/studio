@@ -2,6 +2,7 @@ import type { FooterFormat, FooterType, PageFormat, WritingLanguage } from "@/li
 
 export type ActiveWritingDocument = {
   flush: () => Promise<void>;
+  saveSessionState: () => Promise<void>;
   exportDocx: () => Promise<Blob>;
   getText: () => string;
   print: (documentTitle: string) => boolean;
@@ -30,4 +31,8 @@ export function getActiveWritingDocument(volumeId: string) {
 
 export async function flushOpenWritingDocuments() {
   await Promise.all([...activeDocuments.values()].map((document) => document.flush()));
+}
+
+export async function saveOpenWritingDocumentSessions() {
+  await Promise.all([...activeDocuments.values()].map((document) => document.saveSessionState()));
 }

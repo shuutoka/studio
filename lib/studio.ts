@@ -663,11 +663,11 @@ export function getProjectStats(project: StudioProject): ProjectStats {
   const documentStats = project.volumes.map(getWritingDocumentStats);
   const words = documentStats.reduce((total, stats) => total + stats.words, 0);
   const pageCount = documentStats.reduce((total, stats) => total + stats.pages, 0);
-  const progressBase = project.targetPages > 0 ? project.targetPages : pageCount;
+  const progressBase = project.targetPages;
   return {
     volumes: project.volumes.length, chapters: chapters.length, pages: pageCount,
     completedPages, characters: project.characters.length, notes: project.notes.length, words,
-    progress: progressBase > 0 ? Math.min(100, Math.round((completedPages / progressBase) * 100)) : 0,
+    progress: progressBase > 0 ? Math.min(100, Math.round((pageCount / progressBase) * 100)) : 0,
     completedGoals: project.goals.filter((goal) => goal.status === "done").length,
   };
 }

@@ -1,4 +1,4 @@
-const CACHE_NAME = "enfer-fatal-studio-superdoc-proofing-ranges-2026-10";
+const CACHE_NAME = "enfer-fatal-studio-writing-sessions-2026-10";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => {

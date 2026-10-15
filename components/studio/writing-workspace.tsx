@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BookOpen, ChevronDown, ChevronRight, FileText, Focus, ListTree, LoaderCircle,
   Minimize2, MoreHorizontal, Pencil, Plus, Settings2, Trash2,
@@ -28,11 +28,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { deleteMedia } from "@/lib/studio-db";
+import { deleteMedia, deleteWritingSession } from "@/lib/studio-db";
 import { getActiveWritingDocument } from "@/lib/writing-editor-registry";
 import { ensureStudioDocxStyles } from "@/lib/writing-docx";
 import { loadOrCreateWritingDocument, persistWritingDocument } from "@/lib/writing-document";
 import { writingDocumentMediaId } from "@/lib/writing-document-id";
+import {
+  MAX_CACHED_WRITING_VOLUMES, removeWritingSession, touchWritingSession,
+} from "@/lib/writing-session-cache";
 import {
   createEmptyPage, createEmptyVolume, createId, getVolumePages,
   getWritingDocumentStats, stripHtml, type StudioProject, type StudioSettings,
@@ -42,6 +45,12 @@ import {
 import type { ImportedWritingDocument } from "@/lib/writing-import";
 
 type OutlineEntry = { headingIndex: number; level: number; label: string };
+type CachedVolumeSession = {
+  volumeId: string;
+  blob: Blob | null;
+  error: string;
+  loading: boolean;
+};
 
 const counterLabels: Record<WritingCounterKey, string> = {
   words: "Mots",
@@ -63,7 +72,7 @@ function volumeForPage(project: StudioProject, pageId: string | null) {
 
 export function WritingWorkspace({
   project, selectedPageId, onSelectPage, updateProject, settings, updateSettings,
-  focusMode, onToggleFocus, onOpenSettings,
+  focusMode, onToggleFocus, onOpenSettings, active = true,
 }: {
   project: StudioProject;
   selectedPageId: string | null;
@@ -74,12 +83,14 @@ export function WritingWorkspace({
   focusMode: boolean;
   onToggleFocus: () => void;
   onOpenSettings: () => void;
+  active?: boolean;
 }) {
   const activeVolume = volumeForPage(project, selectedPageId) ?? project.volumes[0] ?? null;
-  const [documentBlob, setDocumentBlob] = useState<Blob | null>(null);
-  const [documentError, setDocumentError] = useState("");
+  const [volumeSessions, setVolumeSessions] = useState<CachedVolumeSession[]>([]);
+  const volumeSessionsRef = useRef<CachedVolumeSession[]>([]);
+  const sessionQueueRef = useRef(Promise.resolve());
   const [collapsedVolumes, setCollapsedVolumes] = useState<Set<string>>(new Set());
-  const [navigationTarget, setNavigationTarget] = useState<{ text: string; token: number } | null>(null);
+  const [navigationTarget, setNavigationTarget] = useState<{ volumeId: string; text: string; token: number } | null>(null);
   const [renameVolumeId, setRenameVolumeId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [deleteVolumeId, setDeleteVolumeId] = useState<string | null>(null);
@@ -89,31 +100,54 @@ export function WritingWorkspace({
   const [drawingColor, setDrawingColor] = useState("#ef4f5f");
   const [drawingSize, setDrawingSize] = useState(4);
 
-  useEffect(() => {
-    if (!activeVolume) {
-      // Document loading is an external IndexedDB synchronization boundary.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setDocumentBlob(null);
-      return;
-    }
-    let cancelled = false;
-    setDocumentBlob(null);
-    setDocumentError("");
-    loadOrCreateWritingDocument(project, activeVolume.id)
-      .then(async (blob) => {
+  const commitSessions = useCallback((next: CachedVolumeSession[]) => {
+    volumeSessionsRef.current = next;
+    setVolumeSessions(next);
+  }, []);
+
+  const loadVolumeSession = useCallback((volumeId: string, retry = false) => {
+    sessionQueueRef.current = sessionQueueRef.current.then(async () => {
+      const volume = project.volumes.find((candidate) => candidate.id === volumeId);
+      if (!volume) return;
+      const existing = volumeSessionsRef.current.find((session) => session.volumeId === volumeId);
+      if (existing && !retry) {
+        commitSessions(touchWritingSession(volumeSessionsRef.current, existing).sessions);
+        return;
+      }
+
+      if (!existing && volumeSessionsRef.current.length >= MAX_CACHED_WRITING_VOLUMES) {
+        const evicted = volumeSessionsRef.current[0];
+        await getActiveWritingDocument(evicted.volumeId)?.flush().catch(() => undefined);
+        await getActiveWritingDocument(evicted.volumeId)?.saveSessionState().catch(() => undefined);
+        commitSessions(removeWritingSession(volumeSessionsRef.current, evicted.volumeId));
+      }
+
+      const pending: CachedVolumeSession = { volumeId, blob: null, error: "", loading: true };
+      commitSessions(touchWritingSession(volumeSessionsRef.current, pending).sessions);
+      try {
+        const blob = await loadOrCreateWritingDocument(project, volumeId);
         const styledBlob = await ensureStudioDocxStyles(blob);
-        if (styledBlob !== blob) await persistWritingDocument(project.id, activeVolume.id, activeVolume.title, styledBlob);
-        return styledBlob;
-      })
-      .then((blob) => { if (!cancelled) setDocumentBlob(blob); })
-      .catch((error) => {
-        if (cancelled) return;
+        if (styledBlob !== blob) await persistWritingDocument(project.id, volumeId, volume.title, styledBlob);
+        const current = volumeSessionsRef.current.find((session) => session.volumeId === volumeId);
+        if (!current) return;
+        commitSessions(volumeSessionsRef.current.map((session) => session.volumeId === volumeId
+          ? { ...session, blob: styledBlob, error: "", loading: false }
+          : session));
+      } catch (error) {
         const message = error instanceof Error ? error.message : "Le manuscrit ne peut pas être ouvert.";
-        setDocumentError(message);
+        const current = volumeSessionsRef.current.find((session) => session.volumeId === volumeId);
+        if (current) commitSessions(volumeSessionsRef.current.map((session) => session.volumeId === volumeId
+          ? { ...session, blob: null, error: message, loading: false }
+          : session));
         toast.error(message);
-      });
-    return () => { cancelled = true; };
-  }, [activeVolume?.id, project.id]);
+      }
+    });
+  }, [commitSessions, project]);
+
+  useEffect(() => {
+    if (!active || !activeVolume) return;
+    loadVolumeSession(activeVolume.id);
+  }, [active, activeVolume, loadVolumeSession]);
 
   const documentStats = useMemo(
     () => activeVolume ? getWritingDocumentStats(activeVolume) : emptyStats(),
@@ -127,6 +161,9 @@ export function WritingWorkspace({
   function selectVolume(volumeId: string) {
     const volume = project.volumes.find((candidate) => candidate.id === volumeId);
     if (!volume) return;
+    if (activeVolume && activeVolume.id !== volumeId) {
+      void getActiveWritingDocument(activeVolume.id)?.saveSessionState();
+    }
     const pageId = firstPageId(volume);
     if (pageId) onSelectPage(pageId);
     else {
@@ -187,6 +224,8 @@ export function WritingWorkspace({
     const index = project.volumes.findIndex((candidate) => candidate.id === volume.id);
     const nextVolume = project.volumes[index + 1] ?? project.volumes[index - 1];
     void deleteMedia(writingDocumentMediaId(volume.id)).catch(() => undefined);
+    void deleteWritingSession(project.id, volume.id).catch(() => undefined);
+    commitSessions(removeWritingSession(volumeSessionsRef.current, volume.id));
     updateProject((draft) => { draft.volumes = draft.volumes.filter((candidate) => candidate.id !== volume.id); });
     const nextPageId = firstPageId(nextVolume);
     if (nextPageId) onSelectPage(nextPageId);
@@ -194,10 +233,9 @@ export function WritingWorkspace({
     setDeleteVolumeConfirm("");
   }
 
-  function applySnapshot(snapshot: WritingDocumentSnapshot) {
-    if (!activeVolume) return;
+  function applySnapshot(volumeId: string, snapshot: WritingDocumentSnapshot) {
     updateProject((draft) => {
-      const volume = draft.volumes.find((candidate) => candidate.id === activeVolume.id);
+      const volume = draft.volumes.find((candidate) => candidate.id === volumeId);
       if (!volume) return;
       volume.documentEngine = "superdoc";
       volume.documentText = snapshot.text;
@@ -288,13 +326,12 @@ export function WritingWorkspace({
 
   const activeVolumeId = activeVolume?.id ?? null;
 
-  const addDrawing = useCallback((stroke: WritingDrawingStroke) => {
-    if (!activeVolumeId) return;
+  const addDrawing = useCallback((volumeId: string, stroke: WritingDrawingStroke) => {
     updateProject((draft) => {
-      const volume = draft.volumes.find((candidate) => candidate.id === activeVolumeId);
+      const volume = draft.volumes.find((candidate) => candidate.id === volumeId);
       if (volume) volume.documentDrawings.push(stroke);
     });
-  }, [activeVolumeId, updateProject]);
+  }, [updateProject]);
 
   const undoDrawing = useCallback(() => {
     if (!activeVolumeId) return;
@@ -314,11 +351,14 @@ export function WritingWorkspace({
 
   function navigateToHeading(volumeId: string, entry: OutlineEntry) {
     selectVolume(volumeId);
-    setNavigationTarget({ text: entry.label, token: Date.now() });
+    setNavigationTarget({ volumeId, text: entry.label, token: Date.now() });
   }
 
   const renameVolume = project.volumes.find((volume) => volume.id === renameVolumeId);
   const deleteVolume = project.volumes.find((volume) => volume.id === deleteVolumeId);
+  const activeSession = activeVolume
+    ? volumeSessions.find((session) => session.volumeId === activeVolume.id) ?? null
+    : null;
 
   return (
     <div
@@ -380,21 +420,29 @@ export function WritingWorkspace({
 
       <div className="flex min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
         {!focusMode && <aside className="hidden w-64 shrink-0 overflow-y-auto border-r border-white/8 bg-[#100f14] p-2 lg:block"><div className="mb-2 flex items-center gap-2 px-2 py-2 text-[11px] font-semibold uppercase tracking-[.14em] text-[#77717f]"><ListTree className="size-3.5" /> Plan DOCX</div><OutlinePanel project={project} activeVolumeId={activeVolume?.id ?? null} outlines={outlines} collapsedVolumes={collapsedVolumes} setCollapsedVolumes={setCollapsedVolumes} onSelectVolume={selectVolume} onNavigate={navigateToHeading} /></aside>}
-        {!activeVolume ? <EmptyWriting onAdd={addVolume} />
-          : documentBlob ? <SuperDocWritingEditor
-            key={activeVolume.id}
-            projectId={project.id}
-            volume={activeVolume}
-            settings={settings}
-            documentBlob={documentBlob}
-            navigationTarget={navigationTarget}
-            onSnapshot={applySnapshot}
-            commentsVisible={commentsVisible}
-            drawingTool={{ enabled: drawingEnabled, color: drawingColor, size: drawingSize }}
-            onAddDrawing={addDrawing}
-            onError={(message) => toast.error(message)}
-          />
-            : <div className="grid flex-1 place-items-center bg-[#28252d] p-8 text-center text-[#8f8996]">{documentError ? <div><FileText className="mx-auto mb-3 size-7" /><p>{documentError}</p><Button className="mt-4" variant="outline" onClick={() => activeVolume && loadOrCreateWritingDocument(project, activeVolume.id).then(setDocumentBlob)}>Réessayer</Button></div> : <span className="flex items-center gap-2"><LoaderCircle className="size-4 animate-spin" /> Conversion et ouverture du DOCX…</span>}</div>}
+        {!activeVolume ? <EmptyWriting onAdd={addVolume} /> : <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-[#28252d]">
+          {volumeSessions.map((session) => {
+            const volume = project.volumes.find((candidate) => candidate.id === session.volumeId);
+            if (!volume || !session.blob) return null;
+            const sessionActive = active && volume.id === activeVolume.id;
+            return <div key={volume.id} className={sessionActive ? "flex min-h-0 min-w-0 flex-1" : "hidden"} aria-hidden={!sessionActive}>
+              <SuperDocWritingEditor
+                projectId={project.id}
+                volume={volume}
+                settings={settings}
+                documentBlob={session.blob}
+                navigationTarget={navigationTarget?.volumeId === volume.id ? navigationTarget : null}
+                onSnapshot={(snapshot) => applySnapshot(volume.id, snapshot)}
+                active={sessionActive}
+                commentsVisible={sessionActive && commentsVisible}
+                drawingTool={{ enabled: sessionActive && drawingEnabled, color: drawingColor, size: drawingSize }}
+                onAddDrawing={(stroke) => addDrawing(volume.id, stroke)}
+                onError={(message) => toast.error(message)}
+              />
+            </div>;
+          })}
+          {!activeSession?.blob && <div className="grid flex-1 place-items-center p-8 text-center text-[#8f8996]">{activeSession?.error ? <div><FileText className="mx-auto mb-3 size-7" /><p>{activeSession.error}</p><Button className="mt-4" variant="outline" onClick={() => loadVolumeSession(activeVolume.id, true)}>Réessayer</Button></div> : <span className="flex items-center gap-2"><LoaderCircle className="size-4 animate-spin" /> Conversion et ouverture du DOCX…</span>}</div>}
+        </div>}
       </div>
 
       <Dialog open={Boolean(renameVolume)} onOpenChange={(open) => !open && setRenameVolumeId(null)}><DialogContent className="border-white/10 bg-[#17151d] text-[#eeeaf2]"><DialogHeader><DialogTitle>Renommer le volume</DialogTitle><DialogDescription className="text-[#9c96a5]">Le nouveau nom sera également utilisé pour le fichier DOCX exporté.</DialogDescription></DialogHeader><Input autoFocus value={renameDraft} className="border-white/10 bg-black/20" onChange={(event) => setRenameDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") confirmRenameVolume(); }} /><DialogFooter><Button variant="ghost" onClick={() => setRenameVolumeId(null)}>Annuler</Button><Button disabled={!renameDraft.trim()} onClick={confirmRenameVolume}>Renommer</Button></DialogFooter></DialogContent></Dialog>
